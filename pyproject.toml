@@ -4,15 +4,18 @@ version = "0.1.0"
 description = "Stateless e-commerce customer service with OpenAI-compatible models"
 requires-python = ">=3.11"
 dependencies = [
+    "anyio>=4,<5",
     "fastapi>=0.115,<1",
+    "httpx2>=2,<3",
     "langchain-core>=1,<2",
+    "langchain-openai>=1,<2",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.7,<3",
     "uvicorn>=0.34,<1",
 ]
 
 [dependency-groups]
-dev = ["httpx2>=2,<3", "pytest>=8.3,<10"]
+dev = ["pytest>=8.3,<10"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
