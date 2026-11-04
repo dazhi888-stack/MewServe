@@ -5,6 +5,7 @@ description = "Stateless e-commerce customer service with OpenAI-compatible mode
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1",
+    "langchain-core>=1,<2",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.7,<3",
     "uvicorn>=0.34,<1",
