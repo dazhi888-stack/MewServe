@@ -36,13 +36,13 @@
 
 - `pyproject.toml`、`uv.lock`、`.gitignore`、`.env.example`：依赖、运行配置与忽略规则。
 - `app/config.py`：Settings、环境校验、get_settings；`app/schemas.py`：请求/响应字段与轮次验证。
-- `app/prompts.py` + `prompts/customer_service.txt`、`prompts/after_sales.txt`：模板加载与渲染；Prompt 的语义效果由标注样例验证。
+- `app/prompts.py` + `prompts/customer_service.txt`、`prompts/extract_aftersales.txt`：模板加载与渲染；Prompt 的语义效果由标注样例验证。
 - `app/context.py`：预算估算与完整轮次裁剪；`app/errors.py`：稳定公开错误码与上游异常映射。
 - `app/model.py`：ChatOpenAI 工厂与依赖；`app/service.py`：模型流式调用与结构化提取。
 - `app/main.py`：FastAPI 路由、SSE 编码、静态资源、health；`app/__init__.py`：包标记。
 - `static/index.html`、`static/styles.css`、`static/chat.js`：同源聊天页。
 - `tests/test_config.py`、`test_context.py`、`test_chat.py`、`test_extract.py` 及 `tests/conftest.py`：后端验证。
-- `evals/after_sales.jsonl`、`evals/chat_cases.jsonl`：带标注的 Prompt 评估集；`scripts/evaluate_prompts.py`：真实模型评估。
+- `evals/aftersales.json`、`evals/customer_service.json`：带标注的 Prompt 评估集；`scripts/evaluate_prompts.py`：真实模型评估。
 - `examples/*.json`、`README.md`：可直接运行的请求体和 PowerShell/curl 验收命令。
 - `artifacts/`：忽略的本地验证产物；不得把密钥写入任何产物。
 
@@ -74,11 +74,11 @@
 - `estimate_tokens(messages: Sequence[BaseMessage]) -> int` 使用每条 UTF-8 字节数 + 固定消息开销的保守估算；预算条件为 input_estimate + MAX_OUTPUT_TOKENS + TOKEN_SAFETY_MARGIN <= CONTEXT_WINDOW_TOKENS。该算法不称为任意上游的精确 tokenizer。
 - `build_extraction_messages(description: str, settings: Settings) -> list[BaseMessage]`；超预算与聊天一致地在模型调用前拒绝。
 
-- [ ] RED：测试 `test_trims_oldest_complete_turns`、`test_message_limit_preserves_pairs`、`test_system_and_latest_user_never_trimmed`、`test_oversized_current_message_rejected`；分别断言最老轮次被移除、保留顺序、总估算预算成立、超限抛稳定错误。
-- [ ] RED：验证错序历史和 system 输入拒绝；字符串 `订单{001}，碎了\n😢` 拼装后原样保留且 system 只有服务端模板；运行 `uv run pytest tests/test_context.py -q` 确认 RED。
-- [ ] GREEN：实现 schema、PromptTemplate 和消息裁剪接口；按完整问答对移除，不做摘要、不静默截断当前输入；运行 config/context 测试至通过。
-- [ ] Prompt/数据验证替代文案 TDD：建立至少 8 个售后标注样例 + 2 组客服对话样例，覆盖前导零、缺字段、主要售后诉求、歧义订单、指令注入、不能假称退款已完成。此时只检查标注/输入可读，真实模型效果留到任务 4/6 执行，不能先写“评估通过”。
-- [ ] 逐文件检查，追加本任务日志并提交快照。
+- [x] RED：测试 `test_trims_oldest_complete_turns`、`test_message_limit_preserves_pairs`、`test_system_and_latest_user_never_trimmed`、`test_oversized_current_message_rejected`；分别断言最老轮次被移除、保留顺序、总估算预算成立、超限抛稳定错误。
+- [x] RED：验证错序历史和 system 输入拒绝；字符串 `订单{001}，碎了\n😢` 拼装后原样保留且 system 只有服务端模板；运行 `uv run pytest tests/test_context.py -q` 确认 RED。
+- [x] GREEN：实现 schema、PromptTemplate 和消息裁剪接口；按完整问答对移除，不做摘要、不静默截断当前输入；运行 config/context 测试至通过。
+- [x] Prompt/数据验证替代文案 TDD：建立至少 8 个售后标注样例 + 2 组客服对话样例，覆盖前导零、缺字段、主要售后诉求、歧义订单、指令注入、不能假称退款已完成。此时只检查标注/输入可读，真实模型效果留到任务 4/6 执行，不能先写“评估通过”。
+- [x] 逐文件检查，追加本任务日志并提交快照。
 
 ## Task 3: 真实 ChatOpenAI 调用路径与 SSE 对话
 
