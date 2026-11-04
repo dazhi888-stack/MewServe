@@ -42,3 +42,24 @@ class ChatRequest(BaseModel):
         ):
             raise ValueError("History must contain complete alternating user/assistant pairs")
         return self
+
+
+class AfterSalesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    description: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("description")
+    @classmethod
+    def nonblank_description(cls, value: str) -> str:
+        return _nonblank(value)
+
+
+class AfterSalesResult(BaseModel):
+    """Only facts explicitly provided by the user; nullable keys stay required."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    order_id: str | None
+    request_type: Literal["refund", "return_refund", "exchange", "repair", "logistics", "other", "unknown"]
+    expected_solution: str | None

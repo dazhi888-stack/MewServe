@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from typing import Annotated
 
-from anyio import CancelScope
+from anyio import CancelScope, create_task_group, get_cancelled_exc_class
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_openai import ChatOpenAI
@@ -14,8 +14,8 @@ from app.config import Settings, get_settings
 from app.context import build_chat_messages
 from app.errors import AppError
 from app.model import get_model
-from app.schemas import ChatRequest
-from app.service import stream_chat
+from app.schemas import AfterSalesRequest, AfterSalesResult, ChatRequest
+from app.service import extract_after_sales, stream_chat
 
 
 @asynccontextmanager
@@ -71,3 +71,36 @@ async def chat_stream(
         events, media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/after-sales/extract", response_model=AfterSalesResult)
+async def after_sales_extract(
+    connection: Request,
+    request: AfterSalesRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    model: Annotated[ChatOpenAI, Depends(get_model)],
+) -> AfterSalesResult:
+    result: AfterSalesResult | None = None
+    error: Exception | None = None
+    async with create_task_group() as group:
+        async def disconnect() -> None:
+            while True:
+                if (await connection.receive())["type"] == "http.disconnect":
+                    group.cancel_scope.cancel()
+                    return
+
+        group.start_soon(disconnect)
+        try:
+            result = await extract_after_sales(request.description, settings, model)
+        except Exception as exc:
+            # Raise outside the task group to preserve the AppError boundary.
+            error = exc
+        else:
+            error = None
+        finally:
+            group.cancel_scope.cancel()
+    if result is None:
+        if error is not None:
+            raise error
+        raise get_cancelled_exc_class()()
+    return result
