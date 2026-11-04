@@ -4,10 +4,12 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from typing import Annotated
+from pathlib import Path
 
 from anyio import CancelScope, create_task_group, get_cancelled_exc_class
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from langchain_openai import ChatOpenAI
 
 from app.config import Settings, get_settings
@@ -26,6 +28,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="MewHelp", lifespan=lifespan)
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def chat_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.exception_handler(AppError)

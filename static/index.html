@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f3ed">
+  <title>MewHelp · 购物好帮手</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/chat.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="intro">
+      <a class="brand" href="/" aria-label="MewHelp 首页"><span class="brand-mark" aria-hidden="true">m.</span>MewHelp</a>
+      <div class="intro-copy">
+        <span class="eyebrow">YOUR SHOPPING COMPANION</span>
+        <h1>购物小事，<br>一起理清。</h1>
+        <p>从选购时的犹豫，到收货后的疑问，<br>把问题交给 MewHelp。</p>
+        <div class="illustration" aria-hidden="true"><div class="bag"><span>m.</span></div><span class="spark spark-one">✦</span><span class="spark spark-two">✦</span><span class="little-dot"></span></div>
+      </div>
+      <div class="intro-foot"><span class="small-line"></span>好好沟通，轻松购物。</div>
+    </aside>
+    <main class="chat-panel">
+      <header class="chat-header">
+        <div class="agent"><span class="agent-avatar" aria-hidden="true">m.</span><div><h2>小喵客服</h2><p><span class="status-dot"></span>AI 购物助手</p></div></div>
+        <button id="new-chat" class="new-chat" type="button"><span aria-hidden="true">＋</span> 新对话</button>
+      </header>
+      <section id="messages" class="messages" aria-label="客服对话" role="log" aria-live="polite" aria-relevant="additions">
+        <div id="welcome" class="welcome">
+          <span class="welcome-tag">很高兴见到你</span>
+          <h3>你好，有什么可以帮你？<span aria-hidden="true">✦</span></h3>
+          <p>商品咨询、物流疑问、退换货说明……<br>说说你遇到的事，我们慢慢聊。</p>
+          <div class="example"><span aria-hidden="true">“</span><p>例如：收到的商品有破损，我该怎么办？</p></div>
+        </div>
+      </section>
+      <div class="composer-area">
+        <p id="status" class="conversation-status" role="status">准备好听你说了</p>
+        <form id="chat-form" class="composer">
+          <label class="sr-only" for="message">输入你的问题</label>
+          <textarea id="message" name="message" rows="2" maxlength="8000" placeholder="说说你需要什么帮助…" required></textarea>
+          <div class="composer-bottom"><span class="input-hint">Enter 发送 · Shift + Enter 换行</span><button id="send" class="send" type="submit" disabled><span id="send-label">发送</span><span aria-hidden="true">↗</span></button></div>
+        </form>
+        <p class="privacy-note">回复由 AI 生成，仅供参考。请勿发送密码、验证码等敏感信息。</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
