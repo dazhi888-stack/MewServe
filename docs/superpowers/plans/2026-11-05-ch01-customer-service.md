@@ -56,11 +56,11 @@
 - 产出 `app.main:app`、GET `/health` → `{"status":"ok","model_configured":false|true}`；`AppError(code, message, status_code)` 供后续任务使用。
 - Settings 中密钥用 SecretStr；配置为空可启动，配置值非法则明确报错；输出预留与安全余量之和必须小于上下文总预算。
 
-- [ ] 按 using-git-worktrees 检查隔离方式。定稿 spec/计划/日志逐文件审查后形成初始文档快照，再建立功能分支/隔离工作区；不拉取、覆盖或推送未知远端历史。
-- [ ] 查证剩余配置/测试 API，安装项目测试依赖，生成可复现锁文件。配置和安装属于本任务，不单独制造脚手架任务。
-- [ ] RED：先写 `test_health_without_env`（200 + model_configured=false）、`test_settings_load_dotenv`（临时 env 文件确实改变模型配置）、`test_settings_budget_validation`（非法预算拒绝）、`test_secret_not_in_repr`；运行 `uv run pytest tests/test_config.py -q`，确认失败源于尚未实现行为。
-- [ ] GREEN：实现上述接口及 `.env.example`，完成同名测试；缺配置的模型请求在任务 3/4 覆盖。
-- [ ] 跑 `uv run pytest tests/test_config.py -q`，断言全部通过；逐文件检查，日志记录 RED/GREEN 结果并提交任务快照。
+- [x] 按 using-git-worktrees 检查隔离方式。定稿 spec/计划/日志逐文件审查后形成初始文档快照，再建立功能分支/隔离工作区；不拉取、覆盖或推送未知远端历史。
+- [x] 查证剩余配置/测试 API，安装项目测试依赖，生成可复现锁文件。配置和安装属于本任务，不单独制造脚手架任务。
+- [x] RED：先写 `test_health_without_env`（200 + model_configured=false）、`test_settings_load_dotenv`（临时 env 文件确实改变模型配置）、`test_settings_budget_validation`（非法预算拒绝）、`test_secret_not_in_repr`；运行 `uv run pytest tests/test_config.py -q`，确认失败源于尚未实现行为。
+- [x] GREEN：实现上述接口及 `.env.example`，完成同名测试；缺配置的模型请求在任务 3/4 覆盖。
+- [x] 跑 `uv run pytest tests/test_config.py -q`，断言全部通过；逐文件检查，日志记录 RED/GREEN 结果并提交任务快照。
 
 ## Task 2: 有界请求、模板与上下文
 
