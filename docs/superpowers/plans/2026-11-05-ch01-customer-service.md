@@ -6,7 +6,7 @@
 
 **Architecture:** 无状态 FastAPI 后端接收 message + history，通过 LangChain PromptTemplate 和 ChatOpenAI 直连 OpenAI Chat Completions 兼容上游。服务端在调用前裁剪完整历史轮次，再流式转发正文 delta；同源静态聊天页在页面内存保存已完成问答。结构化提取独立调用 with_structured_output，不接工具与 Agent。
 
-**Tech Stack:** Python >=3.11；FastAPI、Uvicorn、LangChain Core / langchain-openai、Pydantic Settings；pytest + HTTPX；原生 HTML/CSS/JavaScript；uv 管理依赖和锁文件。
+**Tech Stack:** Python >=3.11；FastAPI、Uvicorn、LangChain Core / langchain-openai、Pydantic Settings；pytest + httpx2（匹配锁定 SDK）；原生 HTML/CSS/JavaScript；uv 管理依赖和锁文件。
 
 **Spec:** `docs/superpowers/specs/2026-11-05-ch01-customer-service-design.md`（用户已批准，必须与本计划一起阅读）。
 
@@ -38,7 +38,7 @@
 - `app/config.py`：Settings、环境校验、get_settings；`app/schemas.py`：请求/响应字段与轮次验证。
 - `app/prompts.py` + `prompts/customer_service.txt`、`prompts/extract_aftersales.txt`：模板加载与渲染；Prompt 的语义效果由标注样例验证。
 - `app/context.py`：预算估算与完整轮次裁剪；`app/errors.py`：稳定公开错误码与上游异常映射。
-- `app/model.py`：ChatOpenAI 工厂与依赖；`app/service.py`：模型流式调用与结构化提取。
+- `app/diagnostics.py`：窄范围安全诊断格式化；`app/model.py`：ChatOpenAI 工厂与依赖；`app/service.py`：模型流式调用与结构化提取。
 - `app/main.py`：FastAPI 路由、SSE 编码、静态资源、health；`app/__init__.py`：包标记。
 - `static/index.html`、`static/styles.css`、`static/chat.js`：同源聊天页。
 - `tests/test_config.py`、`test_context.py`、`test_chat.py`、`test_extract.py` 及 `tests/conftest.py`：后端验证。
@@ -52,7 +52,7 @@
 
 **Interfaces:**
 - 产出 `Settings(BaseSettings)`、`get_settings() -> Settings`；默认缺失的 OpenAI 地址/模型/密钥不阻止 health 启动。
-- 环境变量：`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_API_KEY`、`STRUCTURED_OUTPUT_METHOD=json_mode`、`CONTEXT_WINDOW_TOKENS=8192`、`MAX_OUTPUT_TOKENS=512`、`TOKEN_SAFETY_MARGIN=512`、`HISTORY_MAX_MESSAGES=20`、`REQUEST_TIMEOUT_SECONDS=60`、`SHOP_NAME=MewHelp`。
+- 环境变量：`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_API_KEY`、`STRUCTURED_OUTPUT_METHOD=json_mode`、`OPENAI_TOKEN_LIMIT_FIELD=max_tokens`（可显式选 max_completion_tokens）、`CONTEXT_WINDOW_TOKENS=8192`、`MAX_OUTPUT_TOKENS=512`、`TOKEN_SAFETY_MARGIN=512`、`HISTORY_MAX_MESSAGES=20`、`REQUEST_TIMEOUT_SECONDS=60`、`SHOP_NAME=MewHelp`。
 - 产出 `app.main:app`、GET `/health` → `{"status":"ok","model_configured":false|true}`；`AppError(code, message, status_code)` 供后续任务使用。
 - Settings 中密钥用 SecretStr；配置为空可启动，配置值非法则明确报错；输出预留与安全余量之和必须小于上下文总预算。
 
@@ -90,12 +90,12 @@
 - `stream_chat(prepared: PreparedChat, model: ChatOpenAI) -> AsyncIterator[tuple[str, dict]]`：meta、非空正文 token、done 或 error；上游以 model.astream 迭代。
 - POST `/api/chat/stream` 返回官方 StreamingResponse；SSE data=json.dumps(..., ensure_ascii=False)，事件以空行结束，带 Cache-Control: no-cache 和 X-Accel-Buffering: no。
 
-- [ ] RED：先写 `/api/chat/stream` 首轮 SSE 契约、第二轮上游请求含第一轮 user/assistant、空历史互不串话、请求错误在 headers 开始前返回 422/503 的测试。上游用受控 OpenAI 协议响应，不绕过真实 ChatOpenAI 序列化/反序列化。
-- [ ] RED：写增量门控测试：在第二个上游 chunk 尚未放行时已能消费第一个 token；中文换行/花括号不变；上游结束前不能产生 done。
-- [ ] RED：写流中超时、401/429、空正文或工具/思考块、客户端取消的测试；断言 error 无秘密、取消使上游迭代器结束、失败后无成功 done。运行 `uv run pytest tests/test_chat.py -q`，确认失败原因。
-- [ ] GREEN：实现工厂、依赖、流式生成器和 SSE 路由；错误按稳定公开码映射，始终关闭/取消上游流，不泄露原始异常文本。
-- [ ] 跑 config/context/chat 测试；真实网络冒烟的增量时间和 curl 证据在任务 6 记录，不以 TestClient 拼接结果证明网络实时性。
-- [ ] 逐文件检查，追加本任务日志并提交快照。
+- [x] RED：先写 `/api/chat/stream` 首轮 SSE 契约、第二轮上游请求含第一轮 user/assistant、空历史互不串话、请求错误在 headers 开始前返回 422/503 的测试。上游用受控 OpenAI 协议响应，不绕过真实 ChatOpenAI 序列化/反序列化。
+- [x] RED：写增量门控测试：在第二个上游 chunk 尚未放行时已能消费第一个 token；中文换行/花括号不变；上游结束前不能产生 done。
+- [x] RED：写流中超时、401/429、空正文或工具/思考块、客户端取消的测试；断言 error 无秘密、取消使上游迭代器结束、失败后无成功 done。运行 `uv run pytest tests/test_chat.py -q`，确认失败原因。
+- [x] GREEN：实现工厂、依赖、流式生成器和 SSE 路由；错误按稳定公开码映射，始终关闭/取消上游流，不泄露原始异常文本。
+- [x] 跑 config/context/chat 测试；真实网络冒烟的增量时间和 curl 证据在任务 6 记录，不以 TestClient 拼接结果证明网络实时性。
+- [x] 逐文件检查，追加本任务日志并提交快照。
 
 ## Task 4: 售后结构化提取与 Prompt 评估入口
 
