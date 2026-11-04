@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import subprocess
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager, nullcontext
 
 import httpx2
@@ -64,12 +67,15 @@ async def controlled_model(parts, *, status=200, gate=None):
         return httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
-        model = ChatOpenAI(
-            base_url="https://upstream.invalid/v1", model="customer-model", api_key=SECRET,
-            max_tokens=512, timeout=60, max_retries=0, temperature=None,
-            stream_usage=False, use_responses_api=False, http_async_client=client,
-            http_socket_options=(),
-        )
+        # Keep every factory choice and real LangChain serializer; replace only
+        # the HTTP transport using the SDK's public with_options interface.
+        from app.model import create_model
+        model = create_model(settings())
+        owned_sdk = model.root_async_client
+        model.root_async_client = owned_sdk.with_options(http_client=client)
+        model.async_client = model.root_async_client.chat.completions
+        model.http_async_client = client
+        await owned_sdk.close()
         yield model, stream, requests
 
 
@@ -121,7 +127,8 @@ def test_first_round_sse_and_chat_completions_wire_contract():
     wire = json.loads(requests[0].content)
     assert wire["model"] == "customer-model"
     assert wire["stream"] is True
-    assert wire["max_completion_tokens"] == 512
+    assert wire["max_tokens"] == 512
+    assert "max_completion_tokens" not in wire
     assert "temperature" not in wire
     assert "stream_options" not in wire
     assert [m["role"] for m in wire["messages"]] == ["system", "user"]
@@ -185,7 +192,6 @@ def test_model_factory_configuration():
     assert model.model_name == "customer-model"
     assert model.openai_api_base == "https://upstream.invalid/v1"
     assert model.openai_api_key.get_secret_value() == SECRET
-    assert model.max_tokens == 123
     assert model.request_timeout == 7
     assert model.max_retries == 0
     assert model.temperature is None
@@ -381,3 +387,111 @@ def test_disconnect_while_sse_send_is_backpressured_releases_response(monkeypatc
                     session.task.cancel()
                     await asyncio.gather(session.task, return_exceptions=True)
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("field", ["max_tokens", "max_completion_tokens"])
+def test_real_factory_sends_only_the_selected_token_limit_field(field):
+    async def run():
+        from app.model import create_model
+        from app.context import build_chat_messages
+        from app.schemas import ChatRequest
+        from app.service import stream_chat
+        requests = []
+
+        async def handler(request):
+            requests.append(json.loads(request.content))
+            return httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=WireStream([
+                chunk({"content": "answer"}), chunk(finish="stop"),
+            ]))
+
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+            config = settings(openai_token_limit_field=field, max_output_tokens=137)
+            model = create_model(config)
+            owned_sdk = model.root_async_client
+            model.root_async_client = owned_sdk.with_options(http_client=client)
+            model.async_client = model.root_async_client.chat.completions
+            model.http_async_client = client
+            await owned_sdk.close()
+            events = [event async for event in stream_chat(
+                build_chat_messages(ChatRequest(message="hello"), config), model,
+            )]
+            assert events[-1] == ("done", {"finish_reason": "stop"})
+        assert len(requests) == 1
+        assert {name: requests[0][name] for name in ("max_tokens", "max_completion_tokens") if name in requests[0]} == {field: 137}
+        assert "extra_body" not in requests[0]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("diagnostic_mode", ["stderr", "logging"])
+def test_malformed_response_diagnostics_are_safe_in_real_concurrent_runtime(diagnostic_mode):
+    # A fresh interpreter bypasses pytest's warning recorder and exercises the
+    # actual default stderr / logging.captureWarnings rendering paths.
+    program = r'''
+import asyncio
+import logging
+import sys
+import warnings
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path[:0] = [str(root), str(root / "tests")]
+from test_chat import controlled_model, chunk, settings
+from app.context import build_chat_messages
+from app.schemas import ChatRequest
+from app.service import stream_chat
+from app.diagnostics import install_safe_diagnostics
+initial_formatter = warnings.formatwarning
+install_safe_diagnostics()
+install_safe_diagnostics()
+assert warnings.formatwarning is initial_formatter
+if sys.argv[2] == "logging":
+    logging.basicConfig(level=logging.WARNING)
+    logging.captureWarnings(True)
+warnings.simplefilter("always")
+filters_before = list(warnings.filters)
+formatter_before = warnings.formatwarning
+SECRET_A = "LEAK_A_PRIVATE"
+SECRET_B = "LEAK_B_PRIVATE"
+async def run():
+    gate = asyncio.Event()
+    async with controlled_model([
+        chunk({"content": [{"type": "text", "text": "answer-a"}, {"type": "reasoning", "reasoning": SECRET_A}]}),
+        chunk(finish="stop"),
+    ], gate=gate) as (first, first_wire, _), controlled_model([
+        chunk({"content": [{"type": "text", "text": "answer-b"}, {"type": "reasoning", "reasoning": SECRET_B}]}),
+        chunk(finish="stop"),
+    ], gate=gate) as (second, second_wire, _):
+        prepared = build_chat_messages(ChatRequest(message="hello"), settings())
+        async def collect(model):
+            return [event async for event in stream_chat(prepared, model)]
+        tasks = [asyncio.create_task(collect(first)), asyncio.create_task(collect(second))]
+        try:
+            await asyncio.wait_for(asyncio.gather(first_wire.waiting.wait(), second_wire.waiting.wait()), 3)
+            warnings.warn("unrelated-warning-still-visible", UserWarning)
+            warnings.warn("Pydantic serializer warnings: unrelated-module-kept-visible", UserWarning)
+            gate.set()
+            results = await asyncio.gather(*tasks)
+            assert all(events[-1] == ("done", {"finish_reason": "stop"}) for events in results)
+            assert all(SECRET_A not in str(events) and SECRET_B not in str(events) for events in results)
+            assert first_wire.closed and second_wire.closed
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    assert warnings.filters == filters_before
+    assert warnings.formatwarning is formatter_before
+asyncio.run(run())
+print("concurrent-runtime-ok")
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(Path(__file__).resolve().parents[1]), diagnostic_mode],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    output = result.stdout + result.stderr
+    assert "LEAK_A_PRIVATE" not in output
+    assert "LEAK_B_PRIVATE" not in output
+    assert "unrelated-warning-still-visible" in result.stderr
+    assert "Pydantic serializer warnings: unrelated-module-kept-visible" in result.stderr
+    assert "Model response serialization warning; details withheld." in result.stderr
+    assert "concurrent-runtime-ok" in result.stdout

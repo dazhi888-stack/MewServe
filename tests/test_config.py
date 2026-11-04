@@ -109,3 +109,25 @@ def test_invalid_configuration_fails_at_startup(monkeypatch):
     with pytest.raises(ValidationError):
         with TestClient(app):
             pass
+
+
+def test_token_limit_field_defaults_to_compatible_parameter():
+    from app.config import Settings
+    assert Settings(_env_file=None).openai_token_limit_field == "max_tokens"
+
+
+@pytest.mark.parametrize("value", ["max_tokens", "max_completion_tokens"])
+def test_token_limit_field_loads_from_process_and_dotenv(monkeypatch, tmp_path, value):
+    from app.config import Settings
+    path = tmp_path / ".env"
+    path.write_text(f"OPENAI_TOKEN_LIMIT_FIELD={value}\n", encoding="utf-8")
+    assert Settings(_env_file=path).openai_token_limit_field == value
+    monkeypatch.setenv("OPENAI_TOKEN_LIMIT_FIELD", value)
+    assert Settings(_env_file=None).openai_token_limit_field == value
+
+
+@pytest.mark.parametrize("value", ["", "other", "MAX_TOKENS"])
+def test_token_limit_field_rejects_invalid_values(value):
+    from app.config import Settings
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, openai_token_limit_field=value)

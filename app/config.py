@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     openai_base_url: str = ""
     openai_model: str = ""
     openai_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    openai_token_limit_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     structured_output_method: Literal["json_mode", "json_schema"] = "json_mode"
     context_window_tokens: int = Field(default=8192, gt=0)
     max_output_tokens: int = Field(default=512, gt=0)

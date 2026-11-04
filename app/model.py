@@ -11,6 +11,10 @@ from langchain_openai import ChatOpenAI
 
 from app.config import Settings, get_settings
 from app.errors import AppError
+from app.diagnostics import install_safe_diagnostics
+
+# Stable process initialization, shared by chat and later extraction callers.
+install_safe_diagnostics()
 
 
 def create_model(settings: Settings) -> ChatOpenAI:
@@ -21,7 +25,10 @@ def create_model(settings: Settings) -> ChatOpenAI:
         base_url=settings.openai_base_url,
         model=settings.openai_model,
         api_key=settings.openai_api_key,
-        max_tokens=settings.max_output_tokens,
+        # ChatOpenAI renames max_tokens; extra_body is merged by the SDK
+        # after that conversion, preserving the explicitly selected wire name.
+        max_tokens=None,
+        extra_body={settings.openai_token_limit_field: settings.max_output_tokens},
         timeout=settings.request_timeout_seconds,
         max_retries=0,
         temperature=None,
