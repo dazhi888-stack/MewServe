@@ -131,10 +131,10 @@
 
 **Files:** README、examples 请求文件、必要的后端修复及回归测试、dev-notes；本地 artifacts 放忽略目录。
 
-- [ ] 写 README 与可复用请求文件，含 `uv sync --dev`、复制/填写 .env、`uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`，以及 curl.exe 使用 `--data-binary @examples/xxx.json` 避免 PowerShell JSON 引号问题的首轮、第二轮、售后演示。
-- [ ] 全量运行 `uv run pytest -q`；按需运行静态检查，不堆叠与本章无关的工具。
-- [ ] 实际启动服务，用 curl.exe 观察多个事件到达时序；验证两轮请求和提取接口；浏览器完成本章交互验收。明确记录使用真实模型还是受控测试上游。
-- [ ] 若真实 .env 未配置，先完成全部独立工作，交付可运行命令与明确的待验条件；不得把该状态写成三个模型验收都已通过。
+- [x] 写 README 与可复用请求文件，含 `uv sync --dev`、复制/填写 .env、`uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`，以及 curl.exe 使用 `--data-binary @examples/xxx.json` 避免 PowerShell JSON 引号问题的首轮、第二轮、售后演示。
+- [x] 全量运行 `uv run pytest -q`；按需运行静态检查，不堆叠与本章无关的工具。
+- [x] 实际启动服务，用 curl.exe 观察多个事件到达时序；验证两轮请求和提取接口；浏览器完成本章交互验收。明确记录使用真实模型还是受控测试上游。
+- [x] 若真实 .env 未配置，先完成全部独立工作，交付可运行命令与明确的待验条件；不得把该状态写成三个模型验收都已通过。
 - [ ] 使用 requesting-code-review 分派独立审阅者做后端整体 spec/代码评审，范围不含聊天页面；重要问题先写回归测试、修复后重跑并复核。评审结论立即追记日志。
 - [ ] 按 verification-before-completion 取得新鲜验证证据；按 finishing-a-development-branch 完成获授权的本地整合，外部推送/PR 按用户选择处理。完成时追加 finish 四项记录。
 - [ ] 最终交付实际运行状态、功能演示命令、测试/评估结果、已知局限和 `dev-notes/ch01.md` 路径；未完成项不能计为完成。
