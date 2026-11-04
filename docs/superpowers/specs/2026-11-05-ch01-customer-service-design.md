@@ -40,11 +40,11 @@
 
 ### 供应商结构化输出边界（用户已接受）
 
-Context7 的 Claude 官方文档说明：OpenAI 兼容接口支持 streaming，但忽略 `response_format`。统一协议并不意味着各上游提供相同的原生结构化约束。
+**事实校勘（2026-11-05）**：最初设计依据 Context7 对 Claude 官方同 URL 的旧缓存，记录为支持 streaming、忽略 `response_format`。交付评审后直接核对[当前官方兼容文档](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)的 API behavior / Simple fields：`response_format` 仅接受 `json_schema` 且 `strict:true`；`json_object` / `text` 返回 400。Context7 本轮仍返回旧 Ignored 索引，不能覆盖当前官网。此处更正来源事实，早期检索/用户确认过程保留在 dev-notes；不重开已批准设计、不替换 SDK 或协议。统一协议并不意味着各上游提供相同的原生结构化约束。
 
 用户已接受：保持统一 OpenAI 协议和 `with_structured_output`，按能力显式配置输出方式，结构化校验失败明确报错。实现只允许 `json_mode` / `json_schema`，不使用隐含的 function_calling 默认值，不自动切换 SDK 或协议，不暗中用工具调用兜底。
 
-默认提议使用兼容面较广的 `json_mode`；`json_schema` 为显式可选项。Claude 忽略格式参数时，Prompt 请求 JSON + Pydantic 校验属于尽力抽取，不称为上游强约束；返回成功时仍必须符合相同的响应字段定义。不支持所选模式或校验失败时返回稳定错误，由开发者调整配置，禁止静默降级。
+项目默认仍为 `json_mode`，只用于支持 `json_object` 的上游；对 Claude 应显式设置 `STRUCTURED_OUTPUT_METHOD=json_schema`，现有实现为该模式发送 `strict:true`，并遵守其 JSON Schema 限制。成功时仍必须符合相同的响应字段定义；不支持所选模式或校验失败时返回稳定错误，由开发者调整配置，禁止静默降级。当前官方能力说明不等于本项目已经完成 Claude 真实模型验收，四家真实模型仍待验。
 
 ## 4. 后端接口契约
 

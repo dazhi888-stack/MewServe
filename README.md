@@ -37,7 +37,7 @@ curl.exe --silent --show-error http://127.0.0.1:8000/health
 
 当前输入 token 估计是 **UTF-8 字节数 + 每条消息 16**，不是供应商 tokenizer 的真实计数；服务模板也计入。该策略偏保守，可能提前裁剪；不能保证覆盖任意供应商模板或隐含开销。根据所选模型的真实窗口设置预算并保留余量；受保护的系统/当前消息已超预算时返回 413，绝不静默截断当前输入。
 
-统一协议只统一应用调用形状，不承诺 GPT、Claude、DeepSeek、Ollama 的能力相同，也不支持它们的全部原生扩展。请逐一核对兼容入口、流式文本、输出上限字段及 `response_format` 支持。Claude 的 OpenAI 兼容文档说明 `response_format` 会被忽略，因此该路径不能视为有原生 JSON 约束；Prompt 请求 + 本地校验可能成功也可能明确失败。不能将一家的配置或测试推广为四家均通过。当前仅做过受控兼容上游验证，四家真实模型均未完成本章验收。
+统一协议只统一应用调用形状，不承诺 GPT、Claude、DeepSeek、Ollama 的能力相同，也不支持它们的全部原生扩展。请逐一核对兼容入口、流式文本、输出上限字段及 `response_format` 支持。按 2026-11-05 直接核对的 Claude 官方兼容文档，`response_format` 仅接受 `json_schema` 且 `strict:true`；`json_object` / `text` 返回 400。因此对 Claude 应显式设置 `STRUCTURED_OUTPUT_METHOD=json_schema`，不要使用本项目默认的 `json_mode`；现有实现会为该模式发送 `strict:true`，仍须符合供应商的 JSON Schema 限制并经真实模型验收。早期 Context7 同 URL 缓存曾写成参数被忽略，已按当前官网校正，历史过程保留在 dev-notes。不能将一家的配置或测试推广为四家均通过。当前仅做过受控兼容上游验证，四家真实模型均未完成本章验收。
 
 官方依据：[LangChain OpenAI 集成](https://docs.langchain.com/oss/python/integrations/chat/openai)、[Claude OpenAI SDK 兼容](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)。配置使用当前账号实际可用模型，不在示例中固定未经验证的最新型号。
 
@@ -58,13 +58,18 @@ curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: appli
 
 事件为 `meta`（估计输入 tokens / 裁剪条数）、`token`（`text` 增量）、`done`（`finish_reason`）或 `error`（安全 code/message）。`token` 名称表示文本增量，不保证是一枚模型 token。`done.finish_reason=length` 表示已到输出上限，应提示用户回复可能不完整。响应开始后的错误通过 SSE `error` 发送，不能只看 HTTP 200 判断成功。
 
-要验证连续对话，先保存**本次真实首轮**输出，再生成第二轮 JSON；不是把预设助手文字当成实际回复。以下脚本只接受合法 `done` 且没有 `error` 的首轮：
+要验证连续对话，先保存**本次真实首轮**输出，再生成第二轮 JSON；不是把预设助手文字当成实际回复。以下整段在遇错即停的执行块中运行，只接受合法 `done` 且没有 `error` 的首轮；请完整复制执行，历史生成失败会终止本块，即使已有旧 `artifacts/chat-2.json` 也不会继续发第二次 curl：
 
 ```powershell
-curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@examples/chat-1.json" --output artifacts/chat-1.sse http://127.0.0.1:8000/api/chat/stream
-if ($LASTEXITCODE -ne 0) { throw '首轮网络请求失败' }
-./examples/make-followup.ps1
-curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@artifacts/chat-2.json" http://127.0.0.1:8000/api/chat/stream
+& {
+    $ErrorActionPreference = 'Stop'
+    curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@examples/chat-1.json" --output artifacts/chat-1.sse http://127.0.0.1:8000/api/chat/stream
+    if ($LASTEXITCODE -ne 0) { throw '首轮网络请求失败' }
+    ./examples/make-followup.ps1
+    if (-not $?) { throw '第二轮历史生成失败，停止发送' }
+    curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@artifacts/chat-2.json" http://127.0.0.1:8000/api/chat/stream
+    if ($LASTEXITCODE -ne 0) { throw '第二轮网络请求失败' }
+}
 ```
 
 `examples/chat-2.json` 是可读的**静态格式示例**，其中助手内容是示意文本；实际连续两轮应使用上述生成的 `artifacts/chat-2.json`。接口不接受 `conversation_id`，客户端每次携带完整交替的 user/assistant 问答对；后端只在当前请求内裁剪，不保存历史。每条内容最多 8000 字符，history 最多 100 条，不允许客户端 system 角色。
