@@ -109,11 +109,11 @@
 - 显式调用 `with_structured_output(AfterSalesResult, method=settings.structured_output_method, include_raw=True)`；strict 只在 json_schema 且文档允许时设置，禁止意外 tool-calling fallback。
 - 评估入口：`uv run python scripts/evaluate_prompts.py --output artifacts/ch01-eval.json`，保留合成样例、实际结果、字段评分/客服行为判据、耗时和模型名，不保存 key。配置缺失为未执行并非通过；失败退出非 0。
 
-- [ ] RED：用真实 ChatOpenAI + 受控 OpenAI HTTP 响应测试三个字段、缺字段 null、订单前导零；无效 JSON/非法枚举/缺必填/多余字段/不支持 response_format 返回稳定错误。
-- [ ] RED：检查 json_mode 和 json_schema 发出的 HTTP JSON，必须明确 response_format，且不含 tools/tool_choice。对库可能发生的隐含降级要拒绝而非照发工具调用；输入超预算时不得访问上游。运行 `uv run pytest tests/test_extract.py -q` 确认 RED。
-- [ ] GREEN：实现 with_structured_output 调用、schema 解析和公开错误映射，跑所有后端测试。
-- [ ] 建立并验证评估命令。若用户已在本地 .env 填好可用上游，用标注集跑真实提取和客服行为评估，记录逐样例结果；没有可用上游则保持待验，不伪造数据或跨供应商通过结论。
-- [ ] 逐文件检查，追加本任务日志并提交快照。
+- [x] RED：用真实 ChatOpenAI + 受控 OpenAI HTTP 响应测试三个字段、缺字段 null、订单前导零；无效 JSON/非法枚举/缺必填/多余字段/不支持 response_format 返回稳定错误。
+- [x] RED：检查 json_mode 和 json_schema 发出的 HTTP JSON，必须明确 response_format，且不含 tools/tool_choice。对库可能发生的隐含降级要拒绝而非照发工具调用；输入超预算时不得访问上游。运行 `uv run pytest tests/test_extract.py -q` 确认 RED。
+- [x] GREEN：实现 with_structured_output 调用、schema 解析和公开错误映射，跑所有后端测试。
+- [x] 建立并验证评估命令。若用户已在本地 .env 填好可用上游，用标注集跑真实提取和客服行为评估，记录逐样例结果；没有可用上游则保持待验，不伪造数据或跨供应商通过结论。
+- [x] 逐文件检查，追加本任务日志并提交快照。
 
 ## Task 5: 聊天页面（Vibe Coding，免 TDD/评审）
 
