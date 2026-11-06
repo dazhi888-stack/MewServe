@@ -1,4 +1,8 @@
-"""Validated process/.env configuration, without creating any model client."""
+"""Validated process/.env configuration, without creating any model client.
+
+二次开发改动：模型接入从 OpenAI 兼容配置改为 DeepSeek 官方 API，
+并新增 RAG（Chroma 向量库）与意图识别阈值配置。
+"""
 
 from functools import lru_cache
 from typing import Literal, Self
@@ -15,11 +19,14 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    openai_base_url: str = ""
-    openai_model: str = ""
-    openai_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
-    openai_token_limit_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
-    structured_output_method: Literal["json_mode", "json_schema"] = "json_mode"
+    # ---- DeepSeek 模型配置（原 openai_* 字段已移除） ----
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_model: str = "deepseek-chat"
+    deepseek_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    deepseek_token_limit_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
+    # DeepSeek API 仅支持 json_object 结构化输出；本 fork 收敛为 json_mode，
+    # 不提供 OpenAI 风格的 json_schema 线协议选项。
+    structured_output_method: Literal["json_mode"] = "json_mode"
     context_window_tokens: int = Field(default=8192, gt=0)
     max_output_tokens: int = Field(default=512, gt=0)
     token_safety_margin: int = Field(default=512, ge=0)
@@ -27,12 +34,28 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     shop_name: str = "MewHelp"
 
-    @field_validator("openai_base_url", "openai_model", "shop_name")
+    # ---- RAG / Chroma 配置（新增） ----
+    rag_enabled: bool = True
+    chroma_dir: str = "./chroma_db"
+    faq_file: str = "./knowledge/faqs.md"
+    rag_top_k: int = Field(default=4, gt=0)
+    # 向量库需要 embedding 模型：默认走硅基流动 OpenAI 兼容 embeddings 接口；
+    # 未配置 key 时回退到 Chroma 自带的本地默认 embedding。
+    embedding_base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+
+    # ---- 意图识别阈值配置（新增） ----
+    intent_enabled: bool = True
+    intent_high_threshold: float = Field(default=0.85, ge=0, le=1)
+    intent_low_threshold: float = Field(default=0.60, ge=0, le=1)
+
+    @field_validator("deepseek_base_url", "deepseek_model", "shop_name")
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("openai_base_url")
+    @field_validator("deepseek_base_url")
     @classmethod
     def validate_base_url(cls, value: str) -> str:
         if value:
@@ -46,6 +69,11 @@ class Settings(BaseSettings):
             raise ValueError("SHOP_NAME must not be blank")
         return value
 
+    @field_validator("chroma_dir", "faq_file")
+    @classmethod
+    def strip_paths(cls, value: str) -> str:
+        return value.strip()
+
     @model_validator(mode="after")
     def validate_budget(self) -> Self:
         if self.max_output_tokens + self.token_safety_margin >= self.context_window_tokens:
@@ -55,14 +83,26 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_intent_thresholds(self) -> Self:
+        if self.intent_low_threshold > self.intent_high_threshold:
+            raise ValueError(
+                "INTENT_LOW_THRESHOLD must not exceed INTENT_HIGH_THRESHOLD"
+            )
+        return self
+
     @property
     def model_configured(self) -> bool:
         """Configuration completeness only; this never probes the upstream."""
         return bool(
-            self.openai_base_url
-            and self.openai_model
-            and self.openai_api_key.get_secret_value().strip()
+            self.deepseek_base_url
+            and self.deepseek_model
+            and self.deepseek_api_key.get_secret_value().strip()
         )
+
+    @property
+    def embedding_configured(self) -> bool:
+        return bool(self.embedding_api_key.get_secret_value().strip())
 
 
 @lru_cache

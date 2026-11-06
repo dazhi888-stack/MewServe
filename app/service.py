@@ -4,11 +4,11 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 
-import httpx2
+import httpx
 from openai import BadRequestError, ContentFilterFinishReasonError, LengthFinishReasonError
 from pydantic import ValidationError
 
-from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
 
 from app.config import Settings
 from app.context import PreparedChat, build_extraction_messages
@@ -18,7 +18,7 @@ from app.model import model_response_scope
 
 
 async def stream_chat(
-    prepared: PreparedChat, model: ChatOpenAI,
+    prepared: PreparedChat, model: ChatDeepSeek,
 ) -> AsyncIterator[tuple[str, dict]]:
     yield "meta", {
         "estimated_input_tokens": prepared.estimated_input_tokens,
@@ -57,25 +57,21 @@ async def stream_chat(
 
 
 async def extract_after_sales(
-    description: str, settings: Settings, model: ChatOpenAI,
+    description: str, settings: Settings, model: ChatDeepSeek,
 ) -> AfterSalesResult:
-    """Request-owned JSON extraction; never downgrade to tools or repair JSON."""
-    messages = build_extraction_messages(description, settings)
-    method = settings.structured_output_method
-    # langchain-openai 1.7.4 silently switches these names to function_calling.
-    # Reject before constructing the runnable (no warnings/filter mutation).
-    if method == "json_schema" and (
-        model.model_name.startswith(("gpt-3", "gpt-4-")) or model.model_name == "gpt-4"
-    ):
-        raise structured_error("structured_mode_unsupported")
+    """Request-owned JSON extraction; never downgrade to tools or repair JSON.
 
-    async def require_json_wire(request: httpx2.Request) -> None:
+    二次开发：结构化输出收敛为 json_mode（DeepSeek API 仅支持 json_object，
+    不支持 OpenAI 的 json_schema 线协议），也不再按模型名做 gpt 系列拦截。
+    """
+    messages = build_extraction_messages(description, settings)
+
+    async def require_json_wire(request: httpx.Request) -> None:
         # Final serialized SDK payload, before transport. Also fail closed if a
         # future dependency adds another implicit tool fallback.
         payload = json.loads(request.content)
-        expected = "json_object" if method == "json_mode" else "json_schema"
         if ("tools" in payload or "tool_choice" in payload
-                or payload.get("response_format", {}).get("type") != expected):
+                or payload.get("response_format", {}).get("type") != "json_object"):
             raise structured_error("structured_mode_unsupported")
 
     @asynccontextmanager
@@ -89,8 +85,7 @@ async def extract_after_sales(
 
     try:
         structured = model.with_structured_output(
-            AfterSalesResult, method=method, include_raw=True,
-            **({"strict": True} if method == "json_schema" else {}),
+            AfterSalesResult, method="json_mode", include_raw=True,
         )
         async with wire_scope(), model_response_scope(model):
             envelope = await structured.ainvoke(messages)

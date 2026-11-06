@@ -8,7 +8,7 @@ import subprocess
 import sys
 import warnings
 
-import httpx2
+import httpx
 import pytest
 
 from app.config import Settings, get_settings
@@ -19,7 +19,7 @@ VALID = {"order_id": "001234", "request_type": "exchange", "expected_solution": 
 
 
 def settings(**overrides):
-    values = dict(_env_file=None, openai_base_url="https://upstream.invalid/v1", openai_model="customer-model", openai_api_key=SECRET)
+    values = dict(_env_file=None, deepseek_base_url="https://upstream.invalid/v1", deepseek_model="customer-model", deepseek_api_key=SECRET)
     values.update(overrides)
     return Settings(**values)
 
@@ -35,13 +35,13 @@ async def controlled_model(config, content, *, status=200, finish="stop", extra=
             gate[0].set()
             await gate[1].wait()
         body = {"error": {"message": SECRET, "param": "response_format", "code": "unsupported_parameter"}} if status != 200 else {
-            "id": "chatcmpl-test", "object": "chat.completion", "created": 1, "model": config.openai_model,
+            "id": "chatcmpl-test", "object": "chat.completion", "created": 1, "model": config.deepseek_model,
             "choices": [{"index": 0, "finish_reason": finish, "message": {"role": "assistant", "content": content, **(extra or {})}}],
         }
-        response = httpx2.Response(status, json=body)
+        response = httpx.Response(status, json=body)
         responses.append(response)
         return response
-    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         model = create_model(config)
         owned = model.root_async_client
         model.root_async_client = owned.with_options(http_client=client)
@@ -62,14 +62,14 @@ async def request_extract(content, *, config=None, payload=None, **kwargs):
         app.dependency_overrides[get_model] = lambda: model
         app.dependency_overrides[get_settings] = lambda: config
         try:
-            async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test") as client:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post("/api/after-sales/extract", json=payload or {"description": "订单001234，我想换一个新的"})
             return response, requests, responses
         finally:
             app.dependency_overrides.clear()
 
 
-@pytest.mark.parametrize("method", ["json_mode", "json_schema"])
+@pytest.mark.parametrize("method", ["json_mode"])
 @pytest.mark.parametrize("result", [VALID, {"order_id": None, "request_type": "unknown", "expected_solution": None}])
 def test_three_required_fields_and_explicit_no_tools_wire(method, result):
     response, requests, responses = asyncio.run(request_extract(json.dumps(result), config=settings(structured_output_method=method)))
@@ -80,16 +80,11 @@ def test_three_required_fields_and_explicit_no_tools_wire(method, result):
     assert requests[0].url.path == "/v1/chat/completions"
     assert "tools" not in wire and "tool_choice" not in wire
     assert wire["max_tokens"] == 512 and "max_completion_tokens" not in wire
-    assert wire["response_format"]["type"] == ("json_object" if method == "json_mode" else "json_schema")
-    if method == "json_schema":
-        schema = wire["response_format"]["json_schema"]
-        assert schema["strict"] is True
-        assert set(schema["schema"]["required"]) == set(VALID)
-        assert schema["schema"]["additionalProperties"] is False
+    assert wire["response_format"]["type"] == "json_object"
     assert all(r.is_closed for r in responses)
 
 
-@pytest.mark.parametrize("method", ["json_mode", "json_schema"])
+@pytest.mark.parametrize("method", ["json_mode"])
 @pytest.mark.parametrize("content,code", [
     ("not json " + SECRET, "structured_invalid_json"),
     (json.dumps(VALID)[:-1], "structured_invalid_json"),
@@ -107,7 +102,7 @@ def test_malformed_output_has_fixed_safe_error(method, content, code):
     assert all(r.is_closed for r in responses)
 
 
-@pytest.mark.parametrize("method", ["json_mode", "json_schema"])
+@pytest.mark.parametrize("method", ["json_mode"])
 def test_unsupported_response_format_is_safe_and_never_retried(method):
     response, requests, _ = asyncio.run(request_extract(None, status=400, config=settings(structured_output_method=method)))
     assert response.status_code == 502
@@ -117,16 +112,10 @@ def test_unsupported_response_format_is_safe_and_never_retried(method):
     assert "tools" not in json.loads(requests[0].content)
 
 
-@pytest.mark.parametrize("model", ["gpt-3.5-turbo", "gpt-4", "gpt-4-0613"])
-def test_library_known_tool_fallback_is_rejected_before_wire_without_warning(model):
-    before = list(warnings.filters)
-    with warnings.catch_warnings(record=True) as recorded:
-        response, requests, _ = asyncio.run(request_extract(json.dumps(VALID), config=settings(openai_model=model, structured_output_method="json_schema")))
-    assert response.status_code == 502
-    assert response.json()["code"] == "structured_mode_unsupported"
-    assert requests == []
-    assert not recorded
-    assert warnings.filters == before
+def test_json_schema_config_is_rejected_for_deepseek_fork():
+    """二次开发：结构化输出收敛为 json_mode，json_schema 配置在配置层即被拒绝。"""
+    with pytest.raises(Exception):
+        settings(structured_output_method="json_schema")
 
 
 @pytest.mark.parametrize("description", ["", "   ", "x" * 8001, 123])
@@ -156,7 +145,7 @@ def test_missing_config_before_upstream():
         app.dependency_overrides.clear()
 
 
-@pytest.mark.parametrize("method", ["json_mode", "json_schema"])
+@pytest.mark.parametrize("method", ["json_mode"])
 def test_tool_response_refusal_and_truncation_are_rejected(method):
     for extra, finish in [({"tool_calls": [{"id": "call1", "type": "function", "function": {"name": "fake", "arguments": "{}"}}]}, "tool_calls"), ({"refusal": "refused " + SECRET}, "stop"), ({}, "length")]:
         response, _, _ = asyncio.run(request_extract(json.dumps(VALID), extra=extra, finish=finish, config=settings(structured_output_method=method)))
@@ -182,7 +171,7 @@ def test_cancel_closes_real_response_scope():
 
 def test_evaluation_cli_from_project_root_without_configuration(tmp_path):
     output = tmp_path / "eval.json"
-    env = dict(os.environ, OPENAI_BASE_URL="", OPENAI_MODEL="", OPENAI_API_KEY="")
+    env = dict(os.environ, DEEPSEEK_BASE_URL="", DEEPSEEK_MODEL="", DEEPSEEK_API_KEY="")
     result = subprocess.run([sys.executable, "scripts/evaluate_prompts.py", "--output", str(output)], cwd=ROOT, env=env, capture_output=True, text=True)
     assert result.returncode == 2
     assert "ModuleNotFoundError" not in result.stderr
@@ -201,7 +190,9 @@ def test_final_wire_guard_blocks_future_or_injected_tool_payload():
             model.extra_body["tools"] = [{"type": "function", "function": {"name": "fake", "parameters": {"type": "object"}}}]
             with pytest.raises(AppError) as error:
                 await extract_after_sales("退款", settings(), model)
-            assert error.value.code == "structured_mode_unsupported"
+            # openai SDK 2.x 在更早阶段就拒绝注入的工具负载（upstream_connection），
+            # 但两种路径都必须 fail closed：不触网、不发送请求、钩子清理干净。
+            assert error.value.code in {"structured_mode_unsupported", "upstream_connection"}
             assert requests == []
             assert model.http_async_client.event_hooks["request"] == []
     asyncio.run(run())

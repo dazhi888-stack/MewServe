@@ -68,7 +68,7 @@ def main():
             item["status"] = "not_executed"
     try:
         settings = Settings()
-        report["model"] = settings.openai_model or None
+        report["model"] = settings.deepseek_model or None
         report["structured_output_method"] = settings.structured_output_method
         for kind in ("extraction", "customer_service"):
             for item in report[kind]:

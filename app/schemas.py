@@ -28,6 +28,9 @@ class ChatRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=8000)
     history: list[HistoryMessage] = Field(default_factory=list, max_length=100)
+    # 二次开发新增：意图确认标志。置信度处于中档时服务端返回 confirm 事件，
+    # 用户在页面上确认后，客户端置 confirm_intent=true 重新发送本条消息。
+    confirm_intent: bool = False
 
     @field_validator("message")
     @classmethod

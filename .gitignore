@@ -15,3 +15,4 @@ __pycache__/
 artifacts/
 .superpowers/
 .worktrees/
+chroma_db/

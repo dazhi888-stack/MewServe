@@ -1,4 +1,10 @@
-"""HTTP entry point; health remains independent of model connectivity."""
+"""HTTP entry point; health remains independent of model connectivity.
+
+二次开发改动：
+- 对话管线前置意图识别分支（answer / confirm / refuse 三档）。
+- answer 分支接入 RAG 检索，FAQ 上下文注入 system prompt。
+- SSE 新增 confirm 事件与 need_confirm 完成原因，配合 Streamlit 演示页交互。
+"""
 
 import json
 from collections.abc import AsyncIterator
@@ -10,20 +16,30 @@ from anyio import CancelScope, create_task_group, get_cancelled_exc_class
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from langchain_openai import ChatOpenAI
 
 from app.config import Settings, get_settings
 from app.context import build_chat_messages
 from app.errors import AppError
+from app.intent import CATEGORY_LABELS, IntentResult, classify_intent, route_action
+from langchain_deepseek import ChatDeepSeek
 from app.model import get_model
+from app.rag import FaqRetriever, get_retriever
 from app.schemas import AfterSalesRequest, AfterSalesResult, ChatRequest
 from app.service import extract_after_sales, stream_chat
+
+REFUSAL_MESSAGE = (
+    "抱歉，我是喵帮电商客服，只能为您解答商品规格、运费、退换货、发货时效等"
+    "购物相关问题。您咨询的内容超出了我的服务范围，请换个购物相关的问题试试。"
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Missing model credentials are allowed; malformed settings fail at startup.
-    get_settings()
+    settings = get_settings()
+    # 二次开发新增：启动时初始化 Chroma FAQ 知识库（为空自动导入）。
+    if settings.rag_enabled:
+        get_retriever(settings).ensure_collection()
     yield
 
 
@@ -47,20 +63,90 @@ async def app_error_handler(request: Request, error: AppError) -> JSONResponse:
 
 @app.get("/health")
 def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, str | bool]:
-    return {"status": "ok", "model_configured": settings.model_configured}
+    return {
+        "status": "ok",
+        "model_configured": settings.model_configured,
+        "rag_enabled": settings.rag_enabled,
+    }
+
+
+def get_rag(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> FaqRetriever:
+    return get_retriever(settings)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 async def get_chat_events(
     request: ChatRequest,
     settings: Annotated[Settings, Depends(get_settings)],
-    model: Annotated[ChatOpenAI, Depends(get_model)],
+    model: Annotated[ChatDeepSeek, Depends(get_model)],
+    rag: Annotated[FaqRetriever, Depends(get_rag)],
 ) -> AsyncIterator[AsyncIterator[str]]:
-    prepared = build_chat_messages(request, settings)
+    # 二次开发新增：意图识别分支。用户确认过的消息（confirm_intent=true）直接走回答。
+    intent: IntentResult | None = None
+    action = "answer"
+    if not request.confirm_intent and settings.intent_enabled:
+        intent = await classify_intent(request.message, settings, model)
+        action = route_action(intent, settings)
+
+    # RAG 检索与消息构建放在响应开始前完成：预算超限(413)等错误保持基线的
+    # "先校验后开流"契约，不会在 SSE 已启动后才报错。
+    faq_context = ""
+    prepared = None
+    if action == "answer":
+        if settings.rag_enabled and rag.available:
+            faq_context = "\n\n".join(rag.retrieve(request.message))
+        prepared = build_chat_messages(request, settings, faq_context)
 
     async def events() -> AsyncIterator[str]:
-        async with aclosing(stream_chat(prepared, model)) as stream:
-            async for event, data in stream:
-                yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        if action == "answer":
+            if intent is not None:
+                yield _sse("intent", {
+                    "category": intent.category,
+                    "category_label": CATEGORY_LABELS.get(intent.category, intent.category),
+                    "confidence": intent.confidence,
+                    "action": action,
+                })
+            # 仅在真正命中 FAQ 时通知客户端；meta 由 stream_chat 统一发出，避免重复。
+            if faq_context:
+                yield _sse("rag", {"faq_used": True})
+            async with aclosing(stream_chat(prepared, model)) as stream:
+                async for event, data in stream:
+                    yield _sse(event, data)
+        elif action == "confirm":
+            # 置信度中档：弹确认，不直接回答。客户端确认后携带 confirm_intent 重发。
+            assert intent is not None
+            yield _sse("intent", {
+                "category": intent.category,
+                "category_label": CATEGORY_LABELS.get(intent.category, intent.category),
+                "confidence": intent.confidence,
+                "action": action,
+            })
+            yield _sse("confirm", {
+                "category": intent.category,
+                "category_label": CATEGORY_LABELS.get(intent.category, intent.category),
+                "confidence": intent.confidence,
+                "message": (
+                    f"您的问题不太确定是否关于“{CATEGORY_LABELS.get(intent.category, '购物咨询')}”"
+                    f"（置信度 {intent.confidence:.2f}），请确认后我再为您解答。"
+                ),
+            })
+            yield _sse("done", {"finish_reason": "need_confirm"})
+        else:
+            # 置信度过低：直接拒绝，不调用模型。
+            assert intent is not None
+            yield _sse("intent", {
+                "category": intent.category,
+                "category_label": CATEGORY_LABELS.get(intent.category, intent.category),
+                "confidence": intent.confidence,
+                "action": action,
+            })
+            yield _sse("token", {"text": REFUSAL_MESSAGE})
+            yield _sse("done", {"finish_reason": "refused"})
 
     iterator = events()
     try:
@@ -87,7 +173,7 @@ async def after_sales_extract(
     connection: Request,
     request: AfterSalesRequest,
     settings: Annotated[Settings, Depends(get_settings)],
-    model: Annotated[ChatOpenAI, Depends(get_model)],
+    model: Annotated[ChatDeepSeek, Depends(get_model)],
 ) -> AfterSalesResult:
     result: AfterSalesResult | None = None
     error: Exception | None = None

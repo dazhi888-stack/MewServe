@@ -1,4 +1,4 @@
-"""SSE boundary tests with real ChatOpenAI and controlled OpenAI wire data."""
+"""SSE boundary tests with real ChatDeepSeek and controlled OpenAI wire data."""
 
 import asyncio
 import json
@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager, nullcontext
 
-import httpx2
+import httpx
 import pytest
 from fastapi.testclient import TestClient
-from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
 
 from app.config import Settings, get_settings
 
@@ -20,9 +20,9 @@ SECRET = "test-upstream-secret-must-not-escape"
 def settings(**values):
     return Settings(
         _env_file=None,
-        openai_base_url="https://upstream.invalid/v1",
-        openai_model="customer-model",
-        openai_api_key=SECRET,
+        deepseek_base_url="https://upstream.invalid/v1",
+        deepseek_model="customer-model",
+        deepseek_api_key=SECRET,
         **values,
     )
 
@@ -35,7 +35,7 @@ def chunk(delta=None, finish=None):
     }, ensure_ascii=False) + "\n\n").encode()
 
 
-class WireStream(httpx2.AsyncByteStream):
+class WireStream(httpx.AsyncByteStream):
     def __init__(self, parts, gate=None):
         self.parts = parts
         self.gate = gate
@@ -63,10 +63,10 @@ async def controlled_model(parts, *, status=200, gate=None):
     async def handler(request):
         requests.append(request)
         if status != 200:
-            return httpx2.Response(status, json={"error": {"message": SECRET}})
-        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
+            return httpx.Response(status, json={"error": {"message": SECRET}})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
 
-    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         # Keep every factory choice and real LangChain serializer; replace only
         # the HTTP transport using the SDK's public with_options interface.
         from app.model import create_model
@@ -99,7 +99,7 @@ async def request_chat(parts, payload=None, *, status=200, model_settings=None):
         app.dependency_overrides[get_model] = lambda: model
         app.dependency_overrides[get_settings] = lambda: model_settings or settings()
         try:
-            async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test") as client:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post("/api/chat/stream", json=payload or {"message": "你好"})
             return response, stream, requests
         finally:
@@ -188,16 +188,16 @@ def test_context_budget_is_413_before_upstream():
 def test_model_factory_configuration():
     from app.model import create_model
     model = create_model(settings(request_timeout_seconds=7, max_output_tokens=123))
-    assert isinstance(model, ChatOpenAI)
+    assert isinstance(model, ChatDeepSeek)
     assert model.model_name == "customer-model"
-    assert model.openai_api_base == "https://upstream.invalid/v1"
+    assert model.api_base == "https://upstream.invalid/v1"
     assert model.openai_api_key.get_secret_value() == SECRET
     assert model.request_timeout == 7
     assert model.max_retries == 0
     assert model.temperature is None
     assert model.stream_usage is False
     assert model.use_responses_api is False
-    assert isinstance(model.http_async_client, httpx2.AsyncClient)
+    assert isinstance(model.http_async_client, httpx.AsyncClient)
     asyncio.run(model.root_async_client.close())
 
 
@@ -275,8 +275,8 @@ def test_upstream_http_error_is_safe_sse_error_without_done(status, code):
 
 
 @pytest.mark.parametrize(("failure", "code"), [
-    (httpx2.ReadTimeout(SECRET), "upstream_timeout"),
-    (httpx2.ReadError(SECRET), "upstream_connection"),
+    (httpx.ReadTimeout(SECRET), "upstream_timeout"),
+    (httpx.ReadError(SECRET), "upstream_connection"),
     (ValueError(SECRET), "upstream_error"),
 ])
 def test_midstream_failure_closes_stream_without_done(failure, code):
@@ -400,12 +400,12 @@ def test_real_factory_sends_only_the_selected_token_limit_field(field):
 
         async def handler(request):
             requests.append(json.loads(request.content))
-            return httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=WireStream([
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=WireStream([
                 chunk({"content": "answer"}), chunk(finish="stop"),
             ]))
 
-        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
-            config = settings(openai_token_limit_field=field, max_output_tokens=137)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            config = settings(deepseek_token_limit_field=field, max_output_tokens=137)
             model = create_model(config)
             owned_sdk = model.root_async_client
             model.root_async_client = owned_sdk.with_options(http_client=client)

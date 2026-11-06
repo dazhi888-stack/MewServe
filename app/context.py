@@ -42,8 +42,13 @@ def _reject_oversized() -> None:
     )
 
 
-def build_chat_messages(request: ChatRequest, settings: Settings) -> PreparedChat:
-    system = SystemMessage(CHAT_PROMPT.format(shop_name=settings.shop_name))
+def build_chat_messages(
+    request: ChatRequest, settings: Settings, faq_context: str = "",
+) -> PreparedChat:
+    # 二次开发：faq_context 来自 RAG 检索结果，注入 system prompt；空串时模板原样跳过。
+    system = SystemMessage(
+        CHAT_PROMPT.format(shop_name=settings.shop_name, faq_context=faq_context)
+    )
     latest = HumanMessage(request.message)
     protected = [system, latest]
     budget = _input_budget(settings)
