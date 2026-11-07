@@ -150,27 +150,76 @@ input.addEventListener("keydown", event => {
   }
 });
 
-form.addEventListener("submit", async event => {
-  event.preventDefault();
-  const message = input.value.trim();
-  if (busy || !message) return;
+// 二次开发新增：意图识别结果的小字标注（置信度 + 路由动作）。
+function intentNote(intent, action) {
+  if (!intent) return null;
+  const label = intent.category_label || intent.category || "?";
+  const confidence = typeof intent.confidence === "number" ? intent.confidence.toFixed(2) : "?";
+  const icon = { answer: "✅", confirm: "❓", refuse: "🚫" }[action] || "";
+  return `${icon} 意图：${label}｜置信度 ${confidence}${action === "refuse" ? "｜超出服务范围，已拒答" : ""}`;
+}
+
+// 二次开发新增：中档置信度确认卡片（确认后携带 confirm_intent 重发）。
+function showConfirmCard(reply, message, confirmData) {
+  reply.bubble.textContent = confirmData.message;
+  const actions = document.createElement("div");
+  actions.className = "confirm-actions";
+  const yes = document.createElement("button");
+  yes.type = "button";
+  yes.className = "confirm-btn";
+  yes.textContent = "✅ 是的，回答它";
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "confirm-btn secondary";
+  no.textContent = "❌ 不是，重新输入";
+  actions.append(yes, no);
+  reply.content.append(actions);
+  scrollToBottom();
+
+  function dismiss() {
+    yes.disabled = true;
+    no.disabled = true;
+    actions.remove();
+  }
+
+  yes.addEventListener("click", () => {
+    if (busy) return;
+    dismiss();
+    converse(message, { confirm: true, addUser: false });
+  });
+  no.addEventListener("click", () => {
+    if (busy) return;
+    dismiss();
+    reply.bubble.textContent = "好的，已取消本次回答。您可以换个说法重新提问。";
+    const note = document.createElement("p");
+    note.className = "message-note";
+    note.textContent = "已取消 · 这次问答未加入后续对话";
+    reply.content.append(note);
+    setStatus("已取消本次回答，您可以换个说法重新提问。");
+    scrollToBottom();
+  });
+}
+
+// 统一的对话入口：普通提问与确认重发共用。
+async function converse(message, { confirm = false, addUser = true } = {}) {
   busy = true;
-  input.value = "";
   updateControls();
   welcome.hidden = true;
-  addMessage("user", message);
+  if (addUser) addMessage("user", message);
   const reply = addMessage("assistant", "");
   reply.bubble.classList.add("pending");
   const typing = createTyping(reply.bubble);
   let answer = "";
   let succeeded = false;
   let finishReason = "";
-  setStatus("小喵正在想一想…");
+  let intentData = null;
+  let confirmData = null;
+  setStatus(confirm ? "已确认，小喵正在回答…" : "小喵正在想一想…");
   try {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
-      body: JSON.stringify({ message, history: history.slice(-100) }),
+      body: JSON.stringify({ message, history: history.slice(-100), confirm_intent: confirm }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => null);
@@ -183,23 +232,56 @@ form.addEventListener("submit", async event => {
         answer += data.text;
         typing.append(data.text);
         setStatus("小喵正在回复…");
-      } else if (eventName === "done") {
-        if (!answer.trim() || !["stop", "length"].includes(data.finish_reason)) {
-          throw new ChatError("回复没有完整送达，请重新发送。");
-        }
+      } else if (eventName === "intent") {
+        // 二次开发新增：记录意图信息，回答结束后展示。
+        intentData = data;
+      } else if (eventName === "confirm") {
+        // 二次开发新增：中档置信度确认分支——展示确认卡片并结束本次流。
+        if (typeof data.message !== "string") throw new ChatError("回复格式异常，请重试。");
+        confirmData = data;
+        typing.stop();
+        reply.bubble.classList.remove("pending");
+        showConfirmCard(reply, message, data);
         succeeded = true;
-        finishReason = data.finish_reason;
+        finishReason = "need_confirm";
         return true;
+      } else if (eventName === "done") {
+        if (["stop", "length", "refused"].includes(data.finish_reason) && answer.trim()) {
+          succeeded = true;
+          finishReason = data.finish_reason;
+          return true;
+        }
+        if (data.finish_reason === "need_confirm" && confirmData) {
+          succeeded = true;
+          finishReason = "need_confirm";
+          return true;
+        }
+        throw new ChatError("回复没有完整送达，请重新发送。");
       } else if (eventName === "error") {
         throw new ChatError(typeof data.message === "string" ? data.message : "回复失败，请重试。");
       }
       return false;
     });
     if (!succeeded) throw new ChatError("回复没有完整送达，请重新发送。");
-    await typing.idle();
-    history.push({ role: "user", content: message }, { role: "assistant", content: answer });
-    history = history.slice(-100);
-    setStatus(finishReason === "length" ? "回复已达到本次长度上限，你可以继续追问。" : "你可以接着问，我会联系上文回答。");
+    if (finishReason !== "need_confirm") {
+      await typing.idle();
+      if (finishReason !== "refused") {
+        history.push({ role: "user", content: message }, { role: "assistant", content: answer });
+        history = history.slice(-100);
+      }
+      const note = intentNote(intentData, intentData?.action || (finishReason === "refused" ? "refuse" : "answer"));
+      if (note) {
+        const noteEl = document.createElement("p");
+        noteEl.className = "message-note";
+        noteEl.textContent = note;
+        reply.content.append(noteEl);
+      }
+      setStatus(finishReason === "length" ? "回复已达到本次长度上限，你可以继续追问。"
+        : finishReason === "refused" ? "该问题超出了购物客服的服务范围。"
+        : "你可以接着问，我会联系上文回答。");
+    } else {
+      setStatus("请确认问题是否与您的意图相符。");
+    }
   } catch (error) {
     typing.stop();
     reply.row.classList.add("failed");
@@ -209,13 +291,21 @@ form.addEventListener("submit", async event => {
     note.textContent = "未完成 · 这次问答未加入后续对话";
     reply.content.append(note);
     setStatus(error instanceof ChatError ? error.message : "连接发生异常，请重新发送。这次问答未加入后续对话。", true);
-    input.value = message;
+    if (addUser) input.value = message;
   } finally {
     reply.bubble.classList.remove("pending");
     busy = false;
     updateControls();
     input.focus({ preventScroll: true });
   }
+}
+
+form.addEventListener("submit", event => {
+  event.preventDefault();
+  const message = input.value.trim();
+  if (busy || !message) return;
+  input.value = "";
+  converse(message);
 });
 
 newButton.addEventListener("click", () => {

@@ -582,6 +582,34 @@ textarea:disabled {
     padding:11px 14px;
   }
 }
+
+/* ---- 二次开发新增：意图确认卡片按钮 ---- */
+.confirm-actions {
+  display:flex;
+  gap:8px;
+  margin-top:8px;
+}
+.confirm-btn {
+  border:none;
+  border-radius:10px;
+  padding:7px 14px;
+  font-size:13px;
+  cursor:pointer;
+  background:#b45a3c;
+  color:#fff;
+  transition:opacity .15s ease;
+}
+.confirm-btn:hover {
+  opacity:.85;
+}
+.confirm-btn.secondary {
+  background:#e9e2d9;
+  color:#5c5347;
+}
+.confirm-btn:disabled {
+  cursor:default;
+  opacity:.5;
+}
 @media(prefers-reduced-motion:reduce) {
   * {
     animation:none!important;
