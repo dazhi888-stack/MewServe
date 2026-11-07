@@ -39,11 +39,18 @@ class Settings(BaseSettings):
     chroma_dir: str = "./chroma_db"
     faq_file: str = "./knowledge/faqs.md"
     rag_top_k: int = Field(default=4, gt=0)
+    # 混合检索：向量与 BM25 各自召回的候选数（RRF 融合前的每路 top-k）。
+    rag_candidate_k: int = Field(default=12, gt=0)
     # 向量库需要 embedding 模型：默认走硅基流动 OpenAI 兼容 embeddings 接口；
     # 未配置 key 时回退到 Chroma 自带的本地默认 embedding。
     embedding_base_url: str = "https://api.siliconflow.cn/v1"
     embedding_model: str = "BAAI/bge-m3"
     embedding_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    # 重排：RRF 融合后的候选送 bge-reranker 精排（复用 embedding 的硅基流动配置）。
+    rerank_enabled: bool = True
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    # 多轮对话时是否先用模型把追问改写成独立检索问题。
+    query_rewrite_enabled: bool = True
 
     # ---- 意图识别阈值配置（新增） ----
     intent_enabled: bool = True

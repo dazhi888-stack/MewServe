@@ -42,13 +42,24 @@ def _reject_oversized() -> None:
     )
 
 
+# 二次开发新增：中间档置信度回答时追加的对冲指令（兜底式路由）。
+HEDGE_INSTRUCTION = (
+    "\n【回答提示】系统对本次问题的意图把握有限：请先给出最可能的解答，"
+    "但需在开头用一句话确认理解（如“您是想咨询……吗”），并避免给出绝对的承诺；"
+    "若理解有误，请引导用户补充说明。"
+)
+
+
 def build_chat_messages(
     request: ChatRequest, settings: Settings, faq_context: str = "",
+    hedge: bool = False,
 ) -> PreparedChat:
     # 二次开发：faq_context 来自 RAG 检索结果，注入 system prompt；空串时模板原样跳过。
-    system = SystemMessage(
-        CHAT_PROMPT.format(shop_name=settings.shop_name, faq_context=faq_context)
-    )
+    # hedge=True 时追加对冲指令（意图置信度处于中间档，回答需带确认与缓冲）。
+    system_text = CHAT_PROMPT.format(shop_name=settings.shop_name, faq_context=faq_context)
+    if hedge:
+        system_text += HEDGE_INSTRUCTION
+    system = SystemMessage(system_text)
     latest = HumanMessage(request.message)
     protected = [system, latest]
     budget = _input_budget(settings)

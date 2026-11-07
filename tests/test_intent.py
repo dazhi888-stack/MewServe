@@ -3,7 +3,7 @@
 import pytest
 
 from app.config import Settings
-from app.intent import IntentResult, route_action
+from app.intent import IntentResult, needs_hedge, route_action
 from app.rag import FaqRetriever
 
 
@@ -31,17 +31,18 @@ class TestRouteAction:
         intent = IntentResult(category="irrelevant", confidence=0.70)
         assert route_action(intent, _settings()) == "refuse"
 
-    def test_mid_confidence_requires_confirm(self):
+    def test_mid_confidence_answers_with_hedge(self):
+        # 兜底式路由：中间档不再弹确认，直接回答（话术带对冲），由 needs_hedge 标注。
         intent = IntentResult(category="shipping_fee", confidence=0.61)
-        assert route_action(intent, _settings()) == "confirm"
+        assert route_action(intent, _settings()) == "answer"
         intent = IntentResult(category="other", confidence=0.84)
-        assert route_action(intent, _settings()) == "confirm"
+        assert route_action(intent, _settings()) == "answer"
 
     def test_low_confidence_refuses(self):
-        # 0.60 属于拒绝档（confirm 档为开区间 (0.60, 0.85)）。
-        intent = IntentResult(category="irrelevant", confidence=0.60)
+        # 0.60 属于拒绝档（hedge 档为开区间 (0.60, 0.85)）。
+        intent = IntentResult(category="other", confidence=0.60)
         assert route_action(intent, _settings()) == "refuse"
-        intent = IntentResult(category="irrelevant", confidence=0.01)
+        intent = IntentResult(category="order_issue", confidence=0.01)
         assert route_action(intent, _settings()) == "refuse"
 
     def test_custom_thresholds(self):
@@ -56,6 +57,28 @@ class TestRouteAction:
     def test_invalid_threshold_order_rejected(self):
         with pytest.raises(Exception):
             _settings(intent_high_threshold=0.5, intent_low_threshold=0.9)
+
+
+class TestNeedsHedge:
+    def test_mid_band_hedges(self):
+        assert needs_hedge(IntentResult(category="other", confidence=0.72), _settings())
+        assert needs_hedge(IntentResult(category="shipping_fee", confidence=0.61), _settings())
+        assert needs_hedge(IntentResult(category="greeting", confidence=0.84), _settings())
+
+    def test_outside_band_no_hedge(self):
+        # >= high 或 <= low 都不是对冲档；irrelevant 一律拒答也无对冲。
+        assert not needs_hedge(IntentResult(category="product_spec", confidence=0.90), _settings())
+        assert not needs_hedge(IntentResult(category="product_spec", confidence=0.85), _settings())
+        assert not needs_hedge(IntentResult(category="other", confidence=0.60), _settings())
+        assert not needs_hedge(IntentResult(category="irrelevant", confidence=0.70), _settings())
+
+    def test_custom_thresholds(self):
+        assert not needs_hedge(IntentResult(category="other", confidence=0.70), _settings(
+            intent_high_threshold=0.65, intent_low_threshold=0.5,
+        ))
+        assert needs_hedge(IntentResult(category="other", confidence=0.70), _settings(
+            intent_high_threshold=0.9, intent_low_threshold=0.6,
+        ))
 
 
 class TestFaqParsing:

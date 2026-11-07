@@ -1,11 +1,11 @@
 """意图识别模块（二次开发新增）。
 
 复用 app/service.py 的结构化输出链路（json_mode + Pydantic 校验 + 上游响应校验），
-对用户消息做一次独立分类，产出类别与置信度，由路由规则决定后续分支：
+对用户消息做一次独立分类，产出类别与置信度，由路由规则决定后续分支（兜底式）：
 
 - confidence >= intent_high_threshold（默认 0.85）→ 正常 RAG 问答
-- intent_low ~ high 之间（默认 0.60~0.85）  → 弹出确认，用户确认后再回答
-- confidence <= intent_low_threshold（默认 0.60） → 拒绝无关问题
+- intent_low ~ high 之间（默认 0.60~0.85）  → 仍直接回答，但话术带对冲（hedge）
+- confidence <= intent_low_threshold（默认 0.60）或 irrelevant → 拒绝无关问题
 """
 
 import json
@@ -57,17 +57,24 @@ class IntentResult(BaseModel):
 
 def route_action(
     intent: IntentResult, settings: Settings,
-) -> Literal["answer", "confirm", "refuse"]:
-    """三档路由规则；阈值可在 .env 调整（INTENT_HIGH_THRESHOLD / INTENT_LOW_THRESHOLD）。
+) -> Literal["answer", "refuse"]:
+    """兜底式两档路由；阈值可在 .env 调整（INTENT_HIGH_THRESHOLD / INTENT_LOW_THRESHOLD）。
 
-    - 分类为 irrelevant（模型高度确信与电商无关）→ 直接拒绝；
-    - 其余电商类意图按置信度三档路由：>=high 正常回答、(low, high) 弹确认、<=low 拒绝。
+    - 分类为 irrelevant 或置信度 <= low → 拒绝；
+    - 其余情况一律回答：>= high 正常回答；(low, high) 中间档回答但话术带对冲
+      （见 needs_hedge），不再把确认卡片抛给用户。
     """
     if intent.category == "irrelevant" or intent.confidence <= settings.intent_low_threshold:
         return "refuse"
-    if intent.confidence >= settings.intent_high_threshold:
-        return "answer"
-    return "confirm"
+    return "answer"
+
+
+def needs_hedge(intent: IntentResult, settings: Settings) -> bool:
+    """中间档置信度（low, high 开区间）回答时话术带对冲，降低答错政策的代价。"""
+    return (
+        intent.category != "irrelevant"
+        and settings.intent_low_threshold < intent.confidence < settings.intent_high_threshold
+    )
 
 
 def build_intent_messages(message: str) -> list[BaseMessage]:

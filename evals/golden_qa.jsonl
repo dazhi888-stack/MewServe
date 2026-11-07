@@ -1,0 +1,45 @@
+{"id": "g001", "question": "你们家的保温杯能装多少水？", "intent": "product_spec", "expect_faq": ["保温杯 500ml 的规格", "350ml 和 500ml 有什么区别"]}
+{"id": "g002", "question": "500ml 和 350ml 的杯子差在哪里？", "intent": "product_spec", "expect_faq": ["350ml 和 500ml 有什么区别"]}
+{"id": "g003", "question": "自动喂食器最大能装多少粮食？", "intent": "product_spec", "expect_faq": ["自动喂食器支持多大容量"]}
+{"id": "g004", "question": "猫抓板沙发保护套尺寸是多大的？", "intent": "product_spec", "expect_faq": ["猫抓板沙发保护套的尺寸规格"]}
+{"id": "g005", "question": "加湿器的水箱可以续航多久？", "intent": "product_spec", "expect_faq": ["加湿器 2L 款的水箱容量和续航"]}
+{"id": "g006", "question": "多少金额才免运费？", "intent": "shipping_fee", "expect_faq": ["运费怎么算", "包邮门槛"]}
+{"id": "g007", "question": "偏远地区快递费怎么收？", "intent": "shipping_fee", "expect_faq": ["运费怎么算"]}
+{"id": "g008", "question": "退货的话邮费是我出吗？", "intent": "shipping_fee", "expect_faq": ["退货运费谁承担"]}
+{"id": "g009", "question": "换货寄回去的快递费用算谁的？", "intent": "shipping_fee", "expect_faq": ["换货流程怎么操作", "退货运费谁承担"]}
+{"id": "g010", "question": "收到货之后几天内可以退？", "intent": "return_exchange", "expect_faq": ["退货政策是什么"]}
+{"id": "g011", "question": "我想换个颜色，流程怎么走？", "intent": "return_exchange", "expect_faq": ["换货流程怎么操作"]}
+{"id": "g012", "question": "退款什么时候能到我的账户？", "intent": "refund", "expect_faq": ["退款多久到账"]}
+{"id": "g013", "question": "不想退了能不能只退钱不寄回商品？", "intent": "refund", "expect_faq": ["只退款不退货的情况有哪些"]}
+{"id": "g014", "question": "下单后多久能发货啊？", "intent": "delivery_time", "expect_faq": ["发货时效是多久"]}
+{"id": "g015", "question": "预售的宝贝什么时候发出来？", "intent": "delivery_time", "expect_faq": ["预售商品什么时候发货"]}
+{"id": "g016", "question": "用的哪家快递？一般几天能到？", "intent": "delivery_time", "expect_faq": ["快递一般几天到"]}
+{"id": "g017", "question": "地址填错了，发货之后还能改吗？", "intent": "order_issue", "expect_faq": ["订单发货后可以修改地址吗"]}
+{"id": "g018", "question": "到手的杯子摔坏了怎么处理？", "intent": "order_issue", "expect_faq": ["收到的商品破损了怎么办"]}
+{"id": "g019", "question": "都超过一周了快递还没到怎么办？", "intent": "order_issue", "expect_faq": ["逾期未收到货怎么处理"]}
+{"id": "g020", "question": "在你们家买东西运费险是怎么回事？", "intent": "shipping_fee", "expect_faq": ["退货运费谁承担", "运费怎么算"]}
+{"id": "g021", "question": "杯子可以直接装开水吗？", "intent": "product_spec", "expect_faq": ["保温杯 500ml 的规格", "350ml 和 500ml 有什么区别"]}
+{"id": "g022", "question": "喂食器适合多大的猫粮颗粒？", "intent": "product_spec", "expect_faq": ["自动喂食器支持多大容量"]}
+{"id": "g023", "question": "你好，在吗？", "intent": "greeting", "expect_faq": []}
+{"id": "g024", "question": "早上好呀", "intent": "greeting", "expect_faq": []}
+{"id": "g025", "question": "帮我写一段 Python 快速排序代码", "intent": "irrelevant", "expect_faq": []}
+{"id": "g026", "question": "今天股市行情怎么样？", "intent": "irrelevant", "expect_faq": []}
+{"id": "g027", "question": "你觉得哪家外卖更好吃？", "intent": "irrelevant", "expect_faq": []}
+{"id": "g028", "question": "明天天气如何？", "intent": "irrelevant", "expect_faq": []}
+{"id": "g029", "question": "我想买一双鞋子，你有什么好的介绍嘛", "intent": "other", "expect_faq": []}
+{"id": "g030", "question": "你们店里还有什么别的商品推荐吗？", "intent": "other", "expect_faq": ["保温杯 500ml 的规格", "自动喂食器支持多大容量"]}
+{"id": "g031", "question": "东西收到了，挺满意的，谢谢", "intent": "greeting", "expect_faq": []}
+{"id": "g032", "question": "这个月有什么优惠活动吗？", "intent": "other", "expect_faq": []}
+{"id": "g033", "question": "你们的杯子是304不锈钢的吗？", "intent": "product_spec", "expect_faq": ["保温杯 500ml 的规格"]}
+{"id": "g034", "question": "雨季发货会不会延迟？", "intent": "delivery_time", "expect_faq": ["发货时效是多久", "预售商品什么时候发货"]}
+{"id": "g035", "question": "申请退款了钱怎么还没到账？", "intent": "refund", "expect_faq": ["退款多久到账"]}
+{"id": "g036", "question": "七天无理由退货是包括运费的吧？", "intent": "return_exchange", "expect_faq": ["退货政策是什么", "退货运费谁承担"]}
+{"id": "g037", "question": "收货地址写错省份了怎么改？", "intent": "order_issue", "expect_faq": ["订单发货后可以修改地址吗"]}
+{"id": "g038", "question": "快递到菜鸟驿站了我不在家怎么办？", "intent": "delivery_time", "expect_faq": ["快递一般几天到"]}
+{"id": "g039", "question": "保护套是全包的还是半包的？", "intent": "product_spec", "expect_faq": ["猫抓板沙发保护套的尺寸规格"]}
+{"id": "g040", "question": "发票怎么开？", "intent": "order_issue", "expect_faq": []}
+{"id": "g041", "question": "介绍一下你的功能", "intent": "greeting", "expect_faq": []}
+{"id": "g042", "question": "换的新杯子什么时候能寄到？", "intent": "delivery_time", "expect_faq": ["发货时效是多久", "快递一般几天到"]}
+{"id": "g043", "question": "破损的商品退回去运费给我报销吗？", "intent": "shipping_fee", "expect_faq": ["收到的商品破损了怎么办", "退货运费谁承担"]}
+{"id": "g044", "question": "杯子上有异味怎么清洗？", "intent": "other", "expect_faq": ["保温杯 500ml 的规格"]}
+{"id": "g045", "question": "帮我取消昨天下的那笔订单", "intent": "order_issue", "expect_faq": ["订单发货后可以修改地址吗"]}

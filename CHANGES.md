@@ -73,3 +73,39 @@
 - 结构化输出仅支持 json_mode：DeepSeek API 不支持 OpenAI 的 json_schema 参数。
 - 意图识别只看当前消息（不携带 history），多轮指代模糊时依赖确认机制兜底。
 - Streamlit 演示页未纳入 pytest 门禁（与基线对静态页的处理一致），需实际运行验收。
+
+---
+
+# 二次开发第三批（2026-11-07）：兜底式路由 + RAG 深化 + 评估体系
+
+## 八、意图路由改兜底式（调整）
+
+| 位置 | 改动 |
+|---|---|
+| `app/intent.py` | `route_action()` 由三档改为**两档兜底式**：≤0.60 或 `irrelevant` → 拒绝，其余一律回答；新增 `needs_hedge()`：中间档 (0.60, 0.85) 回答但话术带对冲，不再把确认卡片抛给用户 |
+| `app/context.py` | 新增 `HEDGE_INSTRUCTION` 对冲指令；`build_chat_messages()` 加 `hedge` 参数，中间档回答前在 system prompt 追加"先确认理解、不给绝对承诺"话术 |
+| `app/main.py` | 移除 confirm 事件分支（保留 `confirm_intent` 兼容路径与前端处理逻辑）；`intent` 事件新增 `hedged` 字段；拒答文案补充人工客服/留言引导 |
+| `tests/test_intent.py` | 路由边界测试同步改为两档语义；新增 `TestNeedsHedge` 用例 |
+
+## 九、RAG 混合检索深化（新增）
+
+| 位置 | 改动 |
+|---|---|
+| `app/rag.py` | 检索管线升级为 **BM25 + 向量双路召回 → RRF 融合 → bge-reranker 精排**。BM25 为纯 Python 实现（中文按字 + bigram 切分，零新增依赖）；RRF k=60；重排走硅基流动 `BAAI/bge-reranker-v2-m3`（失败自动降级为 RRF 序） |
+| 查询改写 | 新增 `rewrite_query()`：多轮场景先用模型把追问改写成独立检索问题（如"那质量问题呢"→"质量问题退货运费谁承担"），失败回退原消息 |
+| `app/main.py` | 检索移入线程池（`asyncio.to_thread`）避免阻塞事件循环 |
+| 配置项（新增） | `RAG_CANDIDATE_K=12` / `RERANK_ENABLED` / `RERANK_MODEL` / `QUERY_REWRITE_ENABLED` |
+| `tests/test_rag.py`（新增） | BM25 打分/空索引、中文分词、RRF 融合、FAQ 分片的纯逻辑测试 |
+
+## 十、离线评估体系（新增）
+
+| 位置 | 说明 |
+|---|---|
+| `evals/golden_qa.jsonl`（新增） | 45 条标注样本：意图标签（9 类）+ FAQ 相关题目的期望命中条目关键词 |
+| `evals/run_eval.py`（新增） | 离线评估管线：意图准确率 + 每类 Precision/Recall/F1 + 混淆矩阵 + 误分类明细；检索 Recall@1/3/5 + MRR + 未命中明细；报告落盘 `evals/report.md` |
+| 评估结论（首次全量） | 意图准确率 **86.7%**（45 条）；检索 Recall@1 **94.1%** / Recall@3 97.1% / **MRR 0.956**；A/B 对比：混合+重排比纯向量 Recall@1 **91.2% → 94.1%**、MRR **0.936 → 0.956** |
+
+## 十一、测试与验证（第三批后）
+
+- `pytest`：**122 项全部通过**。
+- 运行评估：`uv run python evals/run_eval.py`（支持 `--part intent|retrieval`、`--limit N`）。
