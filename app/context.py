@@ -52,11 +52,14 @@ HEDGE_INSTRUCTION = (
 
 def build_chat_messages(
     request: ChatRequest, settings: Settings, faq_context: str = "",
-    hedge: bool = False,
+    order_context: str = "", hedge: bool = False,
 ) -> PreparedChat:
     # 二次开发：faq_context 来自 RAG 检索结果，注入 system prompt；空串时模板原样跳过。
+    # 二次开发（第四批）：order_context 来自 Mock 订单工具，同样注入 system prompt。
     # hedge=True 时追加对冲指令（意图置信度处于中间档，回答需带确认与缓冲）。
     system_text = CHAT_PROMPT.format(shop_name=settings.shop_name, faq_context=faq_context)
+    if order_context:
+        system_text += "\n\n" + order_context
     if hedge:
         system_text += HEDGE_INSTRUCTION
     system = SystemMessage(system_text)

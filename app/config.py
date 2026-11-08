@@ -1,7 +1,7 @@
 """Validated process/.env configuration, without creating any model client.
 
 二次开发改动：模型接入从 OpenAI 兼容配置改为 DeepSeek 官方 API，
-并新增 RAG（Chroma 向量库）与意图识别阈值配置。
+并新增 RAG（Chroma 向量库）、意图识别阈值、订单查询工具与语义缓存配置。
 """
 
 from functools import lru_cache
@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     intent_enabled: bool = True
     intent_high_threshold: float = Field(default=0.85, ge=0, le=1)
     intent_low_threshold: float = Field(default=0.60, ge=0, le=1)
+
+    # ---- 订单查询工具配置（第四批新增） ----
+    order_tool_enabled: bool = True
+
+    # ---- 语义缓存配置（第四批新增）：与 FAQ 共用 chroma_dir ----
+    semantic_cache_enabled: bool = True
+    # 命中阈值：问题向量与缓存问题的 cosine 相似度 >= 该值时复用历史回答。
+    cache_similarity_threshold: float = Field(default=0.92, ge=0.5, le=1)
+    # 缓存最大条数，超出按写入时间 FIFO 淘汰。
+    cache_max_entries: int = Field(default=1000, gt=0)
 
     @field_validator("deepseek_base_url", "deepseek_model", "shop_name")
     @classmethod

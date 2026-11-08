@@ -200,6 +200,20 @@ function showConfirmCard(reply, message, confirmData) {
   });
 }
 
+// 二次开发第四批新增：订单工具 / 语义缓存事件的小字标注。
+function toolNote(data) {
+  if (data.tool === "order_query") {
+    return data.found ? `🔧 已查询订单 ${data.order_id || ""}`.trim()
+      : `🔍 未查到订单 ${data.order_id || ""}`.trim();
+  }
+  return null;
+}
+
+function cacheNote(data) {
+  const score = typeof data.score === "number" ? data.score.toFixed(2) : "?";
+  return `⚡ 语义缓存命中（相似度 ${score}），本次未调用模型`;
+}
+
 // 统一的对话入口：普通提问与确认重发共用。
 async function converse(message, { confirm = false, addUser = true } = {}) {
   busy = true;
@@ -214,6 +228,7 @@ async function converse(message, { confirm = false, addUser = true } = {}) {
   let finishReason = "";
   let intentData = null;
   let confirmData = null;
+  let extraNotes = [];
   setStatus(confirm ? "已确认，小喵正在回答…" : "小喵正在想一想…");
   try {
     const response = await fetch("/api/chat/stream", {
@@ -235,6 +250,13 @@ async function converse(message, { confirm = false, addUser = true } = {}) {
       } else if (eventName === "intent") {
         // 二次开发新增：记录意图信息，回答结束后展示。
         intentData = data;
+      } else if (eventName === "tool") {
+        // 二次开发第四批：订单工具执行结果标注。
+        const note = toolNote(data);
+        if (note) extraNotes.push(note);
+      } else if (eventName === "cache") {
+        // 二次开发第四批：语义缓存命中标注。
+        extraNotes.push(cacheNote(data));
       } else if (eventName === "confirm") {
         // 二次开发新增：中档置信度确认分支——展示确认卡片并结束本次流。
         if (typeof data.message !== "string") throw new ChatError("回复格式异常，请重试。");
@@ -270,10 +292,11 @@ async function converse(message, { confirm = false, addUser = true } = {}) {
         history = history.slice(-100);
       }
       const note = intentNote(intentData, intentData?.action || (finishReason === "refused" ? "refuse" : "answer"));
-      if (note) {
+      if (note) extraNotes.unshift(note);
+      if (extraNotes.length) {
         const noteEl = document.createElement("p");
         noteEl.className = "message-note";
-        noteEl.textContent = note;
+        noteEl.textContent = extraNotes.join(" · ");
         reply.content.append(noteEl);
       }
       setStatus(finishReason === "length" ? "回复已达到本次长度上限，你可以继续追问。"

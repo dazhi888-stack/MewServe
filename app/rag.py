@@ -114,16 +114,7 @@ class FaqRetriever:
     # ---------- embedding ----------
 
     def _build_embedding(self):
-        settings = self._settings
-        if settings.embedding_configured:
-            # OpenAI 兼容 embeddings 接口（硅基流动 / DeepSeek 兼容网关均可）。
-            return embedding_functions.OpenAIEmbeddingFunction(
-                api_key=settings.embedding_api_key.get_secret_value(),
-                model_name=settings.embedding_model,
-                api_base=settings.embedding_base_url,
-            )
-        logger.warning("未配置 EMBEDDING_API_KEY，回退到 Chroma 默认本地 embedding。")
-        return embedding_functions.DefaultEmbeddingFunction()
+        return build_embedding_function(self._settings)
 
     # ---------- collection ----------
 
@@ -261,6 +252,22 @@ class FaqRetriever:
         except Exception:
             logger.exception("RAG 检索失败，本次回答将不带知识库上下文。")
             return []
+
+
+def build_embedding_function(settings: Settings):
+    """构建 embedding 函数（二次开发抽取为公共函数，供 RAG 与语义缓存共用）。
+
+    优先走 OpenAI 兼容接口（默认硅基流动 BAAI/bge-m3）；
+    未配置 key 时回退到 Chroma 自带的本地默认 embedding（ONNX MiniLM）。
+    """
+    if settings.embedding_configured:
+        return embedding_functions.OpenAIEmbeddingFunction(
+            api_key=settings.embedding_api_key.get_secret_value(),
+            model_name=settings.embedding_model,
+            api_base=settings.embedding_base_url,
+        )
+    logger.warning("未配置 EMBEDDING_API_KEY，回退到 Chroma 默认本地 embedding。")
+    return embedding_functions.DefaultEmbeddingFunction()
 
 
 # ---------- 查询改写（多轮追问 → 独立检索问题） ----------

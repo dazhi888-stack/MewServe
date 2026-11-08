@@ -13,7 +13,19 @@ def test_health_without_env():
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok", "model_configured": False, "rag_enabled": False,
+        "order_tool_enabled": False, "semantic_cache_enabled": False,
     }
+
+
+def test_order_lookup_endpoint():
+    from app.main import app
+
+    with TestClient(app) as client:
+        found = client.get("/api/orders/MH20261101002")
+        missing = client.get("/api/orders/MH00000000000")
+    assert found.status_code == 200
+    assert found.json()["status"] == "运输中"
+    assert missing.status_code == 404
 
 
 def test_settings_load_dotenv(tmp_path):
@@ -86,7 +98,11 @@ def test_health_reports_only_complete_configuration(monkeypatch, missing):
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "model_configured": missing is None, "rag_enabled": False}
+    # 二次开发第四批：health 新增订单工具与语义缓存开关（测试隔离下均为关闭）。
+    assert response.json() == {
+        "status": "ok", "model_configured": missing is None, "rag_enabled": False,
+        "order_tool_enabled": False, "semantic_cache_enabled": False,
+    }
     assert "test-only-key" not in response.text
 
 

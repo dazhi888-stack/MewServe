@@ -67,7 +67,7 @@ def call_backend(message: str, confirm: bool = False) -> dict:
         "confirm_intent": confirm,
     }
     result = {"text": "", "intent": None, "confirm": None, "error": None,
-              "finish_reason": None}
+              "finish_reason": None, "tool_notes": [], "cache_note": None}
     try:
         with httpx.Client(timeout=120) as client:
             with client.stream(
@@ -108,6 +108,16 @@ def _consume(result: dict, event: str, data: str) -> None:
         result["text"] += payload.get("text", "")
     elif event == "intent":
         result["intent"] = payload
+    elif event == "tool":
+        # 二次开发第四批：订单工具执行结果标注。
+        if payload.get("tool") == "order_query":
+            icon = "🔧 已查询订单" if payload.get("found") else "🔍 未查到订单"
+            result["tool_notes"].append(f"{icon} {payload.get('order_id') or ''}".strip())
+    elif event == "cache":
+        # 二次开发第四批：语义缓存命中标注。
+        score = payload.get("score")
+        score_text = f"{score:.2f}" if isinstance(score, (int, float)) else "?"
+        result["cache_note"] = f"⚡ 语义缓存命中（相似度 {score_text}），本次未调用模型"
     elif event == "confirm":
         result["confirm"] = payload
     elif event == "error":
@@ -153,6 +163,12 @@ def send_message(message: str, confirm: bool = False) -> None:
         content = result["text"] or "（模型没有返回内容）"
         placeholder.markdown(content)
         meta = intent_meta(result["intent"], result["finish_reason"])
+        # 二次开发第四批：工具/缓存标注拼进 meta 小字。
+        extras = list(result.get("tool_notes") or [])
+        if result.get("cache_note"):
+            extras.append(result["cache_note"])
+        if extras:
+            meta = f"{meta} ｜ {' ｜ '.join(extras)}" if meta else " ｜ ".join(extras)
         if meta:
             st.caption(meta)
         entry = {"role": "assistant", "content": content, "meta": None}

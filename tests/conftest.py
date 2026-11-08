@@ -13,6 +13,9 @@ ENV_NAMES = (
     "RAG_ENABLED", "CHROMA_DIR", "FAQ_FILE", "RAG_TOP_K",
     "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_API_KEY",
     "INTENT_ENABLED", "INTENT_HIGH_THRESHOLD", "INTENT_LOW_THRESHOLD",
+    # 二次开发第四批：订单工具与语义缓存同样需要测试隔离。
+    "ORDER_TOOL_ENABLED", "SEMANTIC_CACHE_ENABLED",
+    "CACHE_SIMILARITY_THRESHOLD", "CACHE_MAX_ENTRIES",
 )
 
 
@@ -23,6 +26,8 @@ def isolated_settings(monkeypatch, tmp_path):
     # 测试不访问真实向量库与意图识别上游；需要时在具体测试里显式打开。
     monkeypatch.setenv("RAG_ENABLED", "false")
     monkeypatch.setenv("INTENT_ENABLED", "false")
+    monkeypatch.setenv("ORDER_TOOL_ENABLED", "false")
+    monkeypatch.setenv("SEMANTIC_CACHE_ENABLED", "false")
     monkeypatch.chdir(tmp_path)
     config = sys.modules.get("app.config")
     if config is not None:

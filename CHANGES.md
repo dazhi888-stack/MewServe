@@ -109,3 +109,44 @@
 
 - `pytest`：**122 项全部通过**。
 - 运行评估：`uv run python evals/run_eval.py`（支持 `--part intent|retrieval`、`--limit N`）。
+
+---
+
+# 二次开发第四批（2026-11-08）：Mock 订单工具 + 语义缓存
+
+## 十二、Mock 订单查询工具（新增）
+
+| 位置 | 说明 |
+|---|---|
+| `app/tools.py`（新增） | Mock 订单数据（5 单：已签收/运输中/待发货/已退款；收件人姓名与手机号已脱敏）；`extract_order_ids()` 订单号正则提取（MH + 9~12 位）；`query_order()` 查询；`format_order()` 格式化为注入上下文；`extract_order_id()` 一次 json_mode 结构化抽取兜底；`resolve_order_tool()` 统一入口 |
+| 触发策略 | 消息含订单号 → 正则直查（**零模型开销**）；订单/物流意图但无订单号 → 一次 json_mode 抽取；仍拿不到 → 注入"请用户提供订单号"引导话术。工具结果与 FAQ 同通道注入 system prompt，**不引入 function-calling 多轮循环**，保持基线流式转发与"先校验后开流"契约 |
+| `app/main.py` | answer 分支接入工具；SSE 新增 `tool` 事件（`{tool, order_id, found}`）；新增 `GET /api/orders/{order_id}` 直接查询端点（404 为未收录） |
+| `app/context.py` | `build_chat_messages()` 新增 `order_context` 参数 |
+
+## 十三、语义缓存（新增）
+
+| 位置 | 说明 |
+|---|---|
+| `app/cache.py`（新增） | `SemanticCache`：Chroma `semantic_cache` 集合（与 FAQ 共用 chroma_dir 与 embedding 函数）；`lookup()` 按 cosine 相似度查缓存（阈值默认 0.92）；`store()` 以归一化问题 SHA-1 为键 upsert（重复写入即覆盖）；FIFO 淘汰（默认上限 1000 条）；`clear()` 清空；embedding 函数可注入（测试用确定性伪 embedding） |
+| 缓存策略 | **只缓存首轮提问**（无 history）的回答——多轮回答依赖上下文，语义相近的追问复用首轮答案会出错；命中则跳过订单工具、RAG 与模型调用，整段回答分块回放 |
+| `app/main.py` | answer 分支前置缓存查询（`asyncio.to_thread`，不阻塞事件循环）；命中发 SSE `cache` 事件（`{hit, score}`）；回答完成后写回缓存（失败只记日志不影响本次流） |
+| `app/rag.py` | embedding 构建抽取为公共函数 `build_embedding_function()`，供 RAG 与语义缓存共用 |
+| 配置项（新增） | `ORDER_TOOL_ENABLED` / `SEMANTIC_CACHE_ENABLED` / `CACHE_SIMILARITY_THRESHOLD=0.92` / `CACHE_MAX_ENTRIES=1000` |
+
+## 十四、前端与演示页（调整）
+
+| 位置 | 说明 |
+|---|---|
+| `static/chat.js` | 处理 `tool` / `cache` 事件，在回答下方小字标注"🔧 已查询订单 xxx" / "⚡ 语义缓存命中（相似度 x.xx）"；静态资源版本号 v=2 → v=3 |
+| `streamlit_app.py` | 同步解析 `tool` / `cache` 事件并拼入 meta 小字 |
+
+## 十五、测试与验证（第四批后）
+
+- `pytest`：**149 项全部通过**（新增 27 项：订单号提取/查询/格式化/路由 17 项 + 语义缓存 9 项 + 订单端点 1 项）。
+- 语义缓存测试注入确定性伪 embedding（chromadb EmbeddingFunction 协议），不依赖真实模型与网络。
+- 真实 API 冒烟（本机 8902 端口实测）：
+  1. 「帮我查下订单 MH20261101002 到哪了」→ `tool` 事件 + 正确回答物流状态 ✓
+  2. 同问题重发 → `cache` 事件（相似度 0.9999），跳过 RAG 与模型调用 ✓
+  3. 待发货订单+发货时效问题 → 工具结果与 FAQ 政策融合回答 ✓
+  4. 无关问题拒答回归正常 ✓
+- 已知边界：缓存只做首轮；相似度阈值 0.92 偏保守（近义改写大概率走正常链路），可按业务在 .env 调低；Mock 订单数据重启即恢复默认。
