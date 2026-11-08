@@ -11,6 +11,10 @@
 - 命中返回缓存回答与相似度；未命中由调用方在流式回答完成后写入。
 - 只缓存首轮提问（无 history）的回答——多轮回答依赖上下文，语义相近的
   追问复用首轮答案反而是错的。
+- **订单类问题不入缓存**：向量相似度无法区分"只差订单号"的两个问题
+  （会串单，把 A 订单的答案回给 B 订单），且订单回答含个人信息，全局
+  共享缓存等同把一个人的订单信息回给另一个人。查询侧再做实体比对作
+  二道防线（含历史脏数据防御：无实体标注的旧条目一律不命中）。
 - embedding 函数可注入（测试用确定性伪 embedding，避免真实模型/网络）。
 - 任何异常都不影响主链路：初始化失败 → 缓存不可用；写入失败 → 仅记录日志。
 """
@@ -23,6 +27,7 @@ import chromadb
 
 from app.config import Settings
 from app.rag import build_embedding_function
+from app.tools import extract_order_ids
 
 logger = logging.getLogger("mewhelp.cache")
 
@@ -89,11 +94,23 @@ class SemanticCache:
             metadatas = (result.get("metadatas") or [[]])[0]
             if not distances:
                 return None
+            metadata = metadatas[0] if metadatas else {}
+            # 实体防线一：旧版本条目没有 order_ids 标注，无法确认是否含订单
+            # 数据（历史脏数据），一律不命中，等待 FIFO 淘汰或手动清理。
+            cached_ids_raw = metadata.get("order_ids")
+            if cached_ids_raw is None:
+                return None
+            # 实体防线二：查询含订单号时，必须与缓存条目的订单号完全一致才可
+            # 命中——向量相似度无法区分"只差订单号"的问题（防串单）。
+            query_ids = extract_order_ids(query)
+            cached_ids = {item for item in cached_ids_raw.split(",") if item}
+            if set(query_ids) != cached_ids:
+                return None
             # cosine 空间下 distance = 1 - cosine_similarity。
             score = 1.0 - float(distances[0])
             if score < self._settings.cache_similarity_threshold:
                 return None
-            answer = metadatas[0].get("answer") if metadatas else None
+            answer = metadata.get("answer")
             # 旧格式把回答存为 document；为空时回退读 document 字段。
             answer = answer or documents[0]
             if not answer:
@@ -104,8 +121,15 @@ class SemanticCache:
             return None
 
     def store(self, query: str, answer: str) -> bool:
-        """写入/覆盖缓存（同问题重复写入即更新）；失败仅记录日志返回 False。"""
+        """写入/覆盖缓存（同问题重复写入即更新）；失败仅记录日志返回 False。
+
+        订单类问题（消息含订单号）一律不入缓存：答案绑定具体订单，含个人
+        信息，且全局共享缓存会把订单信息泄漏给语义相近的其他用户。
+        """
         if not answer.strip():
+            return False
+        if extract_order_ids(query):
+            logger.info("问题含订单号，跳过语义缓存（订单回答不入共享缓存）。")
             return False
         if not self.available:
             return False
@@ -116,7 +140,13 @@ class SemanticCache:
                 ids=[key],
                 documents=[normalized],
                 # 浮点时间戳保证同秒内多次写入也可按写入顺序 FIFO 淘汰。
-                metadatas=[{"answer": answer, "created_at": time.time()}],
+                # order_ids 恒为空串（订单类问题在上方已被拦截），仅供
+                # lookup 的实体防线做"该条目已审计、无订单数据"的标注。
+                metadatas=[{
+                    "answer": answer,
+                    "created_at": time.time(),
+                    "order_ids": ",".join(extract_order_ids(query)),
+                }],
             )
             self._evict()
             return True

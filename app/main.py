@@ -96,6 +96,17 @@ def order_lookup(order_id: str) -> dict:
     return order
 
 
+@app.post("/api/cache/clear")
+def cache_clear(settings: Annotated[Settings, Depends(get_settings)]) -> dict:
+    """清空语义缓存（运维接口）：缓存异常/污染时无需删 chroma_db 目录。"""
+    if not settings.semantic_cache_enabled:
+        return {"enabled": False, "cleared": 0}
+    cleared = get_semantic_cache(settings).clear()
+    if cleared < 0:
+        raise HTTPException(status_code=503, detail="语义缓存不可用，无法清理。")
+    return {"enabled": True, "cleared": cleared}
+
+
 def get_rag(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> FaqRetriever:
@@ -179,11 +190,20 @@ async def get_chat_events(
                 yield _sse("done", {"finish_reason": "stop"})
                 return
             # 订单工具命中/未命中都通知客户端；仅在注入了订单上下文时发送。
+            # status 区分三种结果：hit（查到）/ not_found（给了订单号但查无此单）/
+            # need_order_id（没给订单号，已注入引导话术），前端据此展示不同标注。
             if tool_result is not None and tool_result.context:
+                if tool_result.found:
+                    status = "hit"
+                elif tool_result.order_id:
+                    status = "not_found"
+                else:
+                    status = "need_order_id"
                 yield _sse("tool", {
                     "tool": "order_query",
                     "order_id": tool_result.order_id,
                     "found": tool_result.found,
+                    "status": status,
                 })
             # 仅在真正命中 FAQ 时通知客户端；meta 由 stream_chat 统一发出，避免重复。
             if faq_context:

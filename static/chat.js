@@ -201,10 +201,14 @@ function showConfirmCard(reply, message, confirmData) {
 }
 
 // 二次开发第四批新增：订单工具 / 语义缓存事件的小字标注。
+// tool 事件 status 区分三种结果：hit（查到）/ not_found（给了订单号查无此单）/
+// need_order_id（没给订单号，服务端已注入引导话术）。
 function toolNote(data) {
   if (data.tool === "order_query") {
-    return data.found ? `🔧 已查询订单 ${data.order_id || ""}`.trim()
-      : `🔍 未查到订单 ${data.order_id || ""}`.trim();
+    const status = data.status || (data.found ? "hit" : "not_found");
+    if (status === "need_order_id") return "💬 需要订单号才能查询，请把订单号发给我";
+    if (status === "not_found") return `🔍 未查到订单 ${data.order_id || ""}`.trim();
+    return `🔧 已查询订单 ${data.order_id || ""}`.trim();
   }
   return null;
 }

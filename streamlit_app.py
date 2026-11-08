@@ -109,10 +109,16 @@ def _consume(result: dict, event: str, data: str) -> None:
     elif event == "intent":
         result["intent"] = payload
     elif event == "tool":
-        # 二次开发第四批：订单工具执行结果标注。
+        # 二次开发第四批：订单工具执行结果标注；status 区分
+        # hit / not_found（给了订单号查无此单）/ need_order_id（没给订单号）。
         if payload.get("tool") == "order_query":
-            icon = "🔧 已查询订单" if payload.get("found") else "🔍 未查到订单"
-            result["tool_notes"].append(f"{icon} {payload.get('order_id') or ''}".strip())
+            status = payload.get("status") or ("hit" if payload.get("found") else "not_found")
+            if status == "need_order_id":
+                result["tool_notes"].append("💬 需要订单号才能查询")
+            elif status == "not_found":
+                result["tool_notes"].append(f"🔍 未查到订单 {payload.get('order_id') or ''}".strip())
+            else:
+                result["tool_notes"].append(f"🔧 已查询订单 {payload.get('order_id') or ''}".strip())
     elif event == "cache":
         # 二次开发第四批：语义缓存命中标注。
         score = payload.get("score")
@@ -156,8 +162,14 @@ def send_message(message: str, confirm: bool = False) -> None:
 
         if result["error"] and not result["text"]:
             placeholder.error(f"⚠️ {result['error']}")
-            # 失败的回答不进入后续历史（与原基线约定一致）。
             st.session_state.pending_confirm = None
+            # 失败的回答不进入后续历史（与原基线约定一致）；同时回滚本条
+            # 用户消息——否则历史以未配对的 user 消息结尾，后续每次请求
+            # 都会被 422 拒绝，会话永久卡死。
+            msgs = st.session_state.messages
+            if (not confirm and msgs and msgs[-1]["role"] == "user"
+                    and msgs[-1]["content"] == message):
+                msgs.pop()
             return
 
         content = result["text"] or "（模型没有返回内容）"

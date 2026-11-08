@@ -94,6 +94,61 @@ class TestLookupAndStore:
         assert cache.lookup("退货运费谁承担") is not None
 
 
+class TestOrderEntityGuard:
+    """订单类问题不入缓存 + 实体比对二道防线（防串单/防泄漏）。"""
+
+    def test_order_question_not_stored(self, tmp_path):
+        cache = make_cache(tmp_path)
+        # 含订单号的问题不入缓存：答案绑定具体订单且含个人信息。
+        assert cache.store("我的订单MH20261101002到哪了", "您的订单运输中") is False
+        assert cache.lookup("我的订单MH20261101002到哪了") is None
+
+    def test_cross_order_lookup_misses(self, tmp_path):
+        cache = make_cache(tmp_path)
+        # 即使有相似的非订单条目，含订单号的查询也必须走实体比对。
+        cache.store("我的订单到哪了", "请提供订单号")
+        # hash embedding 下两句高度相似，若无实体防线会串单命中。
+        assert cache.lookup("我的订单MH20261105003到哪了") is None
+
+    def test_mismatched_order_id_misses(self, tmp_path):
+        # 防御历史脏数据：手工构造订单号标注不一致的条目。
+        cache = make_cache(tmp_path)
+        cache.ensure()  # 惰性初始化集合
+        collection = cache._collection  # noqa: SLF001
+        collection.upsert(
+            ids=["manual-key"],
+            documents=[_normalize_query("我的订单MH20261101002到哪了")],
+            metadatas=[{"answer": "别的订单的答案", "created_at": 1.0,
+                        "order_ids": "MH20261101002"}],
+        )
+        assert cache.lookup("我的订单MH20261105003到哪了") is None
+
+    def test_matching_order_id_hits(self, tmp_path):
+        # 订单号一致时实体比对放行（同一订单重复提问是合法复用场景）。
+        cache = make_cache(tmp_path)
+        cache.ensure()  # 惰性初始化集合
+        collection = cache._collection  # noqa: SLF001
+        collection.upsert(
+            ids=["manual-key"],
+            documents=[_normalize_query("我的订单MH20261101002到哪了")],
+            metadatas=[{"answer": "您的订单运输中", "created_at": 1.0,
+                        "order_ids": "MH20261101002"}],
+        )
+        assert cache.lookup("我的订单MH20261101002到哪了")["answer"] == "您的订单运输中"
+
+    def test_legacy_entry_without_order_ids_never_hits(self, tmp_path):
+        cache = make_cache(tmp_path)
+        cache.ensure()  # 惰性初始化集合
+        collection = cache._collection  # noqa: SLF001
+        # 旧版本条目没有 order_ids 标注（历史脏数据），一律不命中。
+        collection.upsert(
+            ids=["legacy-key"],
+            documents=[_normalize_query("我的订单到哪了")],
+            metadatas=[{"answer": "旧版缓存的订单答案", "created_at": 1.0}],
+        )
+        assert cache.lookup("我的订单到哪了") is None
+
+
 class TestEvictAndClear:
     def test_fifo_eviction(self, tmp_path):
         cache = make_cache(tmp_path, cache_max_entries=2)

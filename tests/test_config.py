@@ -28,6 +28,16 @@ def test_order_lookup_endpoint():
     assert missing.status_code == 404
 
 
+def test_cache_clear_endpoint_disabled():
+    from app.main import app
+
+    # 测试隔离下语义缓存关闭：清理接口应明确返回未启用，而不是报错。
+    with TestClient(app) as client:
+        response = client.post("/api/cache/clear")
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False, "cleared": 0}
+
+
 def test_settings_load_dotenv(tmp_path):
     from app.config import Settings
 

@@ -27,7 +27,10 @@ from app.errors import AppError
 from app.model import model_response_scope
 
 # 订单号规则：MH 前缀 + 9~12 位数字（与 Mock 数据保持一致）。
-ORDER_ID_RE = re.compile(r"\bMH\d{9,12}\b", re.IGNORECASE)
+# 注意不能用 \b 词边界：中文与 M 之间不产生 \b（中文也算 \w），
+# "订单MH20261101002" 这种紧贴写法会漏匹配。改用显式 lookaround：
+# 前面不能是字母/数字（防 RMH... 误命中），后面不能紧跟数字（防长数字串截断）。
+ORDER_ID_RE = re.compile(r"(?<![A-Za-z0-9])MH\d{9,12}(?!\d)", re.IGNORECASE)
 
 # 需要查询订单的意图类别。
 ORDER_INTENT_CATEGORIES = {"order_issue", "delivery_time"}

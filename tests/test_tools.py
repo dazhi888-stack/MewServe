@@ -35,6 +35,16 @@ class TestExtractOrderIds:
     def test_no_order_id(self):
         assert extract_order_ids("我的快递怎么还没到") == []
 
+    def test_adjacent_to_chinese(self):
+        # 回归：订单号紧贴中文时 \b 词边界不成立（中文也算 \w），曾漏匹配。
+        assert extract_order_ids("我的订单MH20261101002到哪了？") == ["MH20261101002"]
+        assert extract_order_ids("订单号：MH20261101002。") == ["MH20261101002"]
+
+    def test_rejects_embedded_in_longer_token(self):
+        # 前面贴字母（RMH...）或后面跟更长数字串时不得误截取。
+        assert extract_order_ids("编号RMH20261101002") == []
+        assert extract_order_ids("MH2026110100212345") == []
+
 
 class TestQueryOrder:
     def test_known_order(self):
