@@ -29,7 +29,7 @@ from app.config import Settings
 from app.rag import build_embedding_function
 from app.tools import extract_order_ids
 
-logger = logging.getLogger("mewhelp.cache")
+logger = logging.getLogger("mewserve.cache")
 
 COLLECTION_NAME = "semantic_cache"
 

@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     token_safety_margin: int = Field(default=512, ge=0)
     history_max_messages: int = Field(default=20, ge=0)
     request_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
-    shop_name: str = "MewHelp"
+    shop_name: str = "MewServe"
 
     # ---- RAG / Chroma 配置（新增） ----
     rag_enabled: bool = True

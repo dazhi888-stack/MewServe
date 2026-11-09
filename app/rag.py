@@ -26,7 +26,7 @@ from chromadb.utils import embedding_functions
 
 from app.config import Settings
 
-logger = logging.getLogger("mewhelp.rag")
+logger = logging.getLogger("mewserve.rag")
 
 COLLECTION_NAME = "ecommerce_faq"
 

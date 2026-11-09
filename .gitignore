@@ -16,3 +16,8 @@ artifacts/
 .superpowers/
 .worktrees/
 chroma_db/
+
+# Personal notes and scratch docs (not for publishing)
+dev-notes/
+docs/
+pytest-cache-files-*/

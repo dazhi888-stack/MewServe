@@ -1,4 +1,4 @@
-"""MewHelp 对话演示页（Streamlit，二次开发新增）。
+"""MewServe 对话演示页（Streamlit，二次开发新增）。
 
 运行前提：
 1. 启动后端：uvicorn app.main:app --port 8000（仓库根目录下，.env 已配置 DeepSeek）。
@@ -12,7 +12,7 @@ import json
 import httpx
 import streamlit as st
 
-st.set_page_config(page_title="MewHelp 电商客服演示", page_icon="🐱", layout="centered")
+st.set_page_config(page_title="MewServe 电商客服演示", page_icon="🐱", layout="centered")
 
 DEFAULT_BACKEND = "http://127.0.0.1:8000"
 

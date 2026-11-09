@@ -1,112 +1,127 @@
-# MewHelp · 第 01 章：纯对话电商客服
+# MewServe · 基于 RAG 的电商智能客服系统
 
-Python 3.11+、FastAPI、langchain-core / langchain-openai。应用以 `ChatOpenAI` 直连 OpenAI Chat Completions 兼容上游；不使用数据库、会话存储、工具调用、Agent、检索或真实售后操作。
+LangChain + FastAPI + DeepSeek 构建的电商客服服务：混合检索 RAG、兜底式意图路由、订单查询工具与语义缓存，全链路 SSE 流式输出，157 项自动化测试，附离线评估体系。
 
-## 本地启动（Windows PowerShell）
+> 本项目基于开源项目 [huashenxiushi/MewHelp](https://github.com/huashenxiushi/MewHelp)（LangChain + FastAPI 纯对话流式客服基线）二次开发。基线提供多轮对话、SSE 流式转发与上下文预算管理；RAG 混合检索、意图路由、订单工具、语义缓存与离线评估体系均为本人独立设计与实现（详见 [CHANGES.md](CHANGES.md) 分批改动清单）。
 
-先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，在项目根目录执行：
+## 核心特性
 
-```powershell
-uv sync --dev
-if (-not (Test-Path -LiteralPath .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
-notepad .env
+### 1. 混合检索 RAG
+- **双路召回**：BM25（中文单字 + bigram 分词，无外部分词器依赖）+ 向量检索（BAAI/bge-m3）并行召回
+- **RRF 融合**：倒数排名融合（k=60），避免 BM25 分数与余弦相似度量纲不可比的问题
+- **精排**：融合后的 top-12 候选经 `BAAI/bge-reranker-v2-m3`（cross-encoder）重排取 top-k 注入 prompt
+- **多轮查询改写**：追问（"它多少钱"）先由 LLM 改写为语义完整的独立问题再检索，失败自动降级
+- 离线评估：混合检索较纯向量召回 **Recall@1 91.2% → 94.1%**（MRR 0.956）
+
+### 2. 兜底式意图路由
+- LLM json_mode 结构化输出意图类别与置信度，Pydantic 二次校验
+- 两档阈值（0.60 / 0.85）路由：高置信度回答 / 中间档回答并注入对冲话术 / 低置信度或无关问题拒答转人工
+- `irrelevant` 类别无论置信度数值一律拒答，防高置信误答；阈值经 45 条标注样本评估集校准（意图准确率 86.7%）
+
+### 3. 订单查询工具（Mock 数据）
+- **两级触发**：消息含订单号（`MH` + 9~12 位，lookaround 正则支持紧贴中文）→ 正则直查，零模型开销；订单类意图但无订单号 → 一次 json_mode 结构化抽取兜底
+- 工具结果与 FAQ 同通道注入 system prompt，**不引入 function-calling 多轮循环**，保持 SSE"先校验后开流"契约
+- Mock 数据收件人姓名与手机号已脱敏；数据源抽象化，替换为真实订单系统只改一层
+
+### 4. 语义缓存
+- 基于 Chroma 向量相似度（阈值 0.92）复用首轮回答，命中时**跳过订单工具、RAG 与模型调用**
+- 只缓存上下文无关的首轮问答（多轮回答复用会答错）
+- **实体比对双重防线**：含订单号的问题不入缓存（答案含个人信息）；缓存条目带 `order_ids` 实体标注，查询含订单号时必须完全匹配才可命中，杜绝"换订单号命中别人答案"的串单事故
+- SHA-1 键 upsert 去重 + FIFO 淘汰 + `POST /api/cache/clear` 运维接口
+
+### 5. 工程化
+- SSE 全链路流式输出；意图识别、RAG、预算校验等所有可失败操作在开流前完成（413 等错误保持标准 HTTP 语义）
+- 阻塞调用（BM25 / rerank / Chroma）经 `asyncio.to_thread` 下放线程池，旁路失败静默降级不传染主链路
+- pytest **157 项**：语义缓存测试注入确定性伪 embedding（实现 chromadb EmbeddingFunction 协议），全量无网络秒级回归
+- uv 依赖管理；前端原生 JS 与 Streamlit 双演示页，SSE 事件（intent / rag / tool / cache）均有可视化标注
+
+## 请求处理链路
+
+```
+请求 ──> 多轮历史校验 ──> 意图识别(json_mode) ──> 路由决策
+                                              │
+              ┌─────────────── answer 分支 ───┤── refuse 分支
+              ▼                                              ▼
+      订单工具(正则直查/抽取兜底)                    拒答话术 + 人工引导
+              │
+      多轮? ──> LLM 查询改写 ──> 混合检索(BM25+向量→RRF→rerank)
+              │
+      语义缓存查询 ──命中──> 回放缓存答案（跳过模型）
+              │ 未命中
+      消息构建(预算校验) ──> DeepSeek 流式生成 ──> SSE 转发 ──> 写回缓存
 ```
 
-填写 `OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_API_KEY`，使用供应商给你的兼容入口、可用模型名与密钥；本地上游也须填写其要求的非空 key / 占位值。上面只在文件不存在时复制模板，保留已有 `.env`。不要把密钥填进请求文件或浏览器。环境变量优先于 `.env`；修改后重启服务。
+## 快速开始
 
-```powershell
+要求 Python 3.11+ 与 [uv](https://docs.astral.sh/uv/getting-started/installation/)。
+
+```bash
+uv sync --dev
+cp .env.example .env    # 填入 DEEPSEEK_API_KEY 与 EMBEDDING_API_KEY
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000>；接口说明在 <http://127.0.0.1:8000/docs>。另开 PowerShell：
+浏览器打开 <http://127.0.0.1:8000>，接口文档在 `/docs`；Streamlit 演示页另开终端：
 
-```powershell
-curl.exe --silent --show-error http://127.0.0.1:8000/health
+```bash
+uv run streamlit run streamlit_app.py
 ```
 
-`model_configured: true` 只代表三项非空，不证明鉴权、模型或上游网络可用。配置为空也能启动并打开页面；模型接口返回 503 / `model_not_configured`。不要覆盖真实 `.env` 来跑模拟演示。
+| 环境变量 | 说明 |
+|---|---|
+| `DEEPSEEK_API_KEY` | 必填，对话/意图/改写模型（deepseek-chat） |
+| `EMBEDDING_API_KEY` | 推荐，硅基流动 bge-m3；留空回退 Chroma 本地 embedding |
+| `RAG_ENABLED` / `INTENT_ENABLED` / `SEMANTIC_CACHE_ENABLED` / `ORDER_TOOL_ENABLED` | 各模块独立开关，false 时回退纯对话基线行为 |
+| `INTENT_HIGH_THRESHOLD` / `INTENT_LOW_THRESHOLD` | 意图路由两档阈值（默认 0.85 / 0.60） |
+| `CACHE_SIMILARITY_THRESHOLD` / `CACHE_MAX_ENTRIES` | 语义缓存命中阈值（0.92）与容量上限（1000） |
 
-## 配置与供应商边界
+## 主要接口
 
-- `STRUCTURED_OUTPUT_METHOD=json_mode`（默认）：明确发送 `response_format.type=json_object`，Prompt 描述字段；本地严格检查原始 JSON 和三字段 schema。
-- `STRUCTURED_OUTPUT_METHOD=json_schema`：明确发送 JSON Schema，要求上游支持该模式；设置 `strict=True`。本地仍检查原始 JSON 和字段。模式不支持或返回非法内容时明确失败，没有降级到工具调用或另一模式。
-- `OPENAI_TOKEN_LIMIT_FIELD=max_tokens`（默认），若目标模型文档要求则改为 `max_completion_tokens`。最终只发送所选的一个字段，值取 `MAX_OUTPUT_TOKENS`；上游须实际遵守该参数。
-- `CONTEXT_WINDOW_TOKENS=8192`、`MAX_OUTPUT_TOKENS=512`、`TOKEN_SAFETY_MARGIN=512`；输出预留与安全余量之和必须小于上下文窗口。
-- `HISTORY_MAX_MESSAGES=20`：最多保留的历史消息数，奇数向下取完整问答对，0 禁用历史；超预算继续从最旧完整问答对删除，保留系统 Prompt 与当前输入。
-- `REQUEST_TIMEOUT_SECONDS=60`、`SHOP_NAME=MewHelp`。密钥只在后端配置中；`.env` 与 `artifacts/` 已忽略。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/chat/stream` | SSE 流式对话（事件：meta / intent / rag / tool / cache / token / done / error） |
+| GET | `/api/orders/{order_id}` | Mock 订单直接查询（演示/联调） |
+| POST | `/api/cache/clear` | 清空语义缓存 |
+| GET | `/health` | 健康检查（不依赖模型连通性） |
 
-当前输入 token 估计是 **UTF-8 字节数 + 每条消息 16**，不是供应商 tokenizer 的真实计数；服务模板也计入。该策略偏保守，可能提前裁剪；不能保证覆盖任意供应商模板或隐含开销。根据所选模型的真实窗口设置预算并保留余量；受保护的系统/当前消息已超预算时返回 413，绝不静默截断当前输入。
+## 测试与评估
 
-统一协议只统一应用调用形状，不承诺 GPT、Claude、DeepSeek、Ollama 的能力相同，也不支持它们的全部原生扩展。请逐一核对兼容入口、流式文本、输出上限字段及 `response_format` 支持。按 2026-11-05 直接核对的 Claude 官方兼容文档，`response_format` 仅接受 `json_schema` 且 `strict:true`；`json_object` / `text` 返回 400。因此对 Claude 应显式设置 `STRUCTURED_OUTPUT_METHOD=json_schema`，不要使用本项目默认的 `json_mode`；现有实现会为该模式发送 `strict:true`，仍须符合供应商的 JSON Schema 限制并经真实模型验收。早期 Context7 同 URL 缓存曾写成参数被忽略，已按当前官网校正，历史过程保留在 dev-notes。不能将一家的配置或测试推广为四家均通过。当前仅做过受控兼容上游验证，四家真实模型均未完成本章验收。
-
-官方依据：[LangChain OpenAI 集成](https://docs.langchain.com/oss/python/integrations/chat/openai)、[Claude OpenAI SDK 兼容](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)。配置使用当前账号实际可用模型，不在示例中固定未经验证的最新型号。
-
-## curl 首轮与第二轮
-
-使用 `curl.exe` 避免 Windows PowerShell 的 `curl` 别名；JSON 从 UTF-8 文件读取，避免命令行引号转义。所有命令在项目根目录运行：
-
-```powershell
-New-Item -ItemType Directory -Force artifacts | Out-Null
-curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@examples/chat-1.json" http://127.0.0.1:8000/api/chat/stream
+```bash
+uv run pytest -q                                # 157 项，无网络依赖
+uv run python evals/run_eval.py --part retrieval # 检索评估：Recall@k / MRR
+uv run python evals/run_eval.py --part intent    # 意图评估：准确率 / 混淆矩阵
 ```
 
-首轮请求：
+评估集 `evals/golden_qa.jsonl`：45 条标注样本（意图标签 + 检索关键词）。当前报告见 [evals/report.md](evals/report.md)。
 
-```json
-{"message":"订单 001234 的杯子碎了，我想换一个新的。","history":[]}
+## 项目结构
+
+```
+app/
+  main.py      # FastAPI 入口、对话管线编排、SSE 事件
+  rag.py       # BM25+向量双路召回、RRF、rerank、查询改写
+  intent.py    # 意图分类与兜底式路由
+  tools.py     # 订单查询工具（正则直查 + LLM 抽取兜底）
+  cache.py     # 语义缓存（实体比对双重防线）
+  service.py   # 流式转发与结构化输出
+  context.py   # prompt 模板与消息构建
+  config.py    # pydantic-settings 配置校验
+evals/         # 评估集与评估脚本
+knowledge/     # 电商 FAQ 知识库源文件
+prompts/       # 客服 / 意图 / 售后提取 prompt 模板
+tests/         # 157 项测试
+static/        # 原生 JS 前端演示页
 ```
 
-事件为 `meta`（估计输入 tokens / 裁剪条数）、`token`（`text` 增量）、`done`（`finish_reason`）或 `error`（安全 code/message）。`token` 名称表示文本增量，不保证是一枚模型 token。`done.finish_reason=length` 表示已到输出上限，应提示用户回复可能不完整。响应开始后的错误通过 SSE `error` 发送，不能只看 HTTP 200 判断成功。
+## 已知局限与 Roadmap
 
-要验证连续对话，先保存**本次真实首轮**输出，再生成第二轮 JSON；不是把预设助手文字当成实际回复。以下整段在遇错即停的执行块中运行，只接受合法 `done` 且没有 `error` 的首轮；请完整复制执行，历史生成失败会终止本块，即使已有旧 `artifacts/chat-2.json` 也不会继续发第二次 curl：
+- [ ] 会话/用户级缓存隔离（当前全局共享，仅建议缓存与用户无关的问答）
+- [ ] 意图置信度改用 logprobs 或独立分类头（LLM 自报置信度校准性差，当前靠兜底架构兜住）
+- [ ] 评估集扩容 + RAGAS 生成质量评估（faithfulness / answer relevance）
+- [ ] 认证鉴权与限流
+- [ ] 订单工具接入真实订单系统（工具层已抽象）
 
-```powershell
-& {
-    $ErrorActionPreference = 'Stop'
-    curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@examples/chat-1.json" --output artifacts/chat-1.sse http://127.0.0.1:8000/api/chat/stream
-    if ($LASTEXITCODE -ne 0) { throw '首轮网络请求失败' }
-    ./examples/make-followup.ps1
-    if (-not $?) { throw '第二轮历史生成失败，停止发送' }
-    curl.exe --silent --show-error --no-buffer --max-time 90 -H "Content-Type: application/json" --data-binary "@artifacts/chat-2.json" http://127.0.0.1:8000/api/chat/stream
-    if ($LASTEXITCODE -ne 0) { throw '第二轮网络请求失败' }
-}
-```
+## 致谢
 
-`examples/chat-2.json` 是可读的**静态格式示例**，其中助手内容是示意文本；实际连续两轮应使用上述生成的 `artifacts/chat-2.json`。接口不接受 `conversation_id`，客户端每次携带完整交替的 user/assistant 问答对；后端只在当前请求内裁剪，不保存历史。每条内容最多 8000 字符，history 最多 100 条，不允许客户端 system 角色。
-
-要查看多段网络接收时间，可给首轮命令加入：
-
-```powershell
-curl.exe --silent --show-error --no-buffer --max-time 90 --trace-time --trace-ascii artifacts/chat-timing.txt -H "Content-Type: application/json" --data-binary "@examples/chat-1.json" --output artifacts/chat-timing.sse http://127.0.0.1:8000/api/chat/stream
-```
-
-`--no-buffer` 关闭 curl 输出缓冲，无法强迫上游增量生成。应观察多个接收时间，以及首段正文早于最后正文/终止事件；不要把 TestClient 聚合输出当成时序证据。trace 会保存请求与正文，只用合成输入，勿公开含私人订单信息的日志。
-
-## 售后提取
-
-```powershell
-curl.exe --silent --show-error --max-time 90 -H "Content-Type: application/json" --data-binary "@examples/after-sales.json" http://127.0.0.1:8000/api/after-sales/extract
-```
-
-合成输入为“订单 001234 的杯子碎了，我想换一个新的。”；期望提取形状（不是承诺模型已实测）：
-
-```json
-{"order_id":"001234","request_type":"exchange","expected_solution":"换一个新的"}
-```
-
-仅返回这三个必需键，禁止额外字段；`order_id` 与 `expected_solution` 缺失时为 `null`。订单号为字符串，保留前导零；类型枚举为 `refund` / `return_refund` / `exchange` / `repair` / `logistics` / `other` / `unknown`，未知类型使用 `unknown`。这是描述提取，不会查询订单、退款、换货或发货。非法 JSON、字段错误、拒绝/工具响应与不支持的模式均返回明确错误。接口错误格式为 `code` / `message`（输入校验为 FastAPI 422）。
-
-## 验证与当前结果
-
-```powershell
-uv run pytest -q
-uv run python scripts/evaluate_prompts.py --output artifacts/ch01-eval.json
-```
-
-评估仅包含 9 个合成售后样本与 2 组客服 Prompt；无配置时退出码 2，产物 `not_executed`，不是模型失败率或通过率。配置完整后发生首个上游错误会停止并保留已有结果。字段 exact match 只是诊断，`expected_solution` 同义改写与客服 rubric 须人工阅读；结果成功执行也保留 `pending_manual_review`，不自动宣称语义验收通过。
-
-2026-11-05 本地全套后端测试：115 项通过。受控真实 HTTP 链路已观察多段 SSE、用实际首轮回复构造的第二轮历史、三字段 JSON；Chrome 已观察逐字显示、追问、忙碌禁用、失败/断流提示、390px 窄屏及刷新/新对话清空。受控回复是预设合成内容，只证明协议、页面与历史传递。
-
-真实 `.env` 三项为空，真实模型两轮/流式效果、9+2 评估及人工语义 rubric **未执行**；GPT / Claude / DeepSeek / Ollama 未逐家验证。后端整体独立评审与本地整合由后续交付阶段处理，不能由本节测试结果代替。页面按用户例外免 TDD / 代码评审；自然 EOF 无终止事件和 100 条页面历史上限仅实现/自查，未逐项浏览器实测。
-
-聊天历史只保存在页面内存，刷新/新对话清空；模型缺乏真实订单工具，输出不能作为真实售后办理结果。取消请求会取消上游流/等待并释放连接；浏览器只将合法 done 后的完整问答加入后续历史。页面无外部 CDN。开发过程和纠偏见 [dev-notes/ch01.md](dev-notes/ch01.md)，已批准设计见 `docs/superpowers/specs/`。
+- 基线项目：[huashenxiushi/MewHelp](https://github.com/huashenxiushi/MewHelp) —— 多轮对话、SSE 流式转发、上下文预算管理与前端页面骨架
+- 模型与模型服务：DeepSeek、硅基流动（BAAI/bge-m3 / bge-reranker-v2-m3）

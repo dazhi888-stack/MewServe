@@ -1,5 +1,5 @@
 [project]
-name = "mewhelp"
+name = "mewserve"
 version = "0.1.0"
 description = "Stateless e-commerce customer service powered by DeepSeek with RAG"
 requires-python = ">=3.11"

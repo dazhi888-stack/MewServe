@@ -1,1 +1,1 @@
-"""MewHelp customer-service application."""
+"""MewServe customer-service application."""
